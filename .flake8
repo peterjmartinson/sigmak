@@ -1,0 +1,25 @@
+[flake8]
+max-line-length = 120
+
+extend-ignore =
+    # E203: whitespace before ':' (Black conflict)
+    E203,
+    # E501: line too long 
+    E501,
+    # W503: line break before binary operator
+    W503,
+    # E266: too many leading '#' for block comment
+    E266,
+    # E261: at least two spaces before inline comment
+    E261
+
+exclude =
+    .git,
+    __pycache__,
+    dist,
+    build,
+    .venv,
+    venv,
+    JOURNAL.md
+
+max-complexity = 10
