@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Peter Martinson, Distracted Fortune. All rights reserved.
+# This software is proprietary and not licensed for use, modification, or distribution.
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import List, Dict, Any
 

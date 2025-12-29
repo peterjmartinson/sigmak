@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Peter Martinson, Distracted Fortune. All rights reserved.
+# This software is proprietary and not licensed for use, modification, or distribution.
+
 import pytest
 from sec_risk_api.processing import chunk_risk_section
 
