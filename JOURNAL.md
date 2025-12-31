@@ -38,3 +38,40 @@ Successfully implemented the "Transform" phase of the ingestion pipeline. Raw ex
 ### Observations
 - Moving to `langchain-text-splitters` instead of the full `langchain` package kept the environment footprint significantly smaller.
 - The unit tests confirmed that metadata (ticker, year) is correctly propagated to every atomic chunk.
+
+## [2025-12-30] Subissue 1.1: Chroma DB Infrastructure Integrated
+
+### Technical Summary
+Established the "Vault" layer of the pipeline, moving from ephemeral text processing to a persistent semantic storage engine.
+
+Strategy: Implemented a PersistentClient in Chroma DB to ensure the vector index survives session restarts on the WSL disk.
+
+Index Configuration: Created the sec_risk_factors collection using hnsw:space: "cosine". This distance metric was chosen specifically for SEC filings, as it prioritizes the thematic orientation of risk disclosures over raw document length.
+
+Idempotency: Switched to get_or_create_collection to support "Onion Stability," allowing the script to initialize an empty DB or reconnect to an existing one without data duplication.
+
+### Performance Metrics
+Cold Start Latency: ~1.2s (Client initialization and HNSW graph creation).
+
+Heartbeat Latency: <1ms (Verified via client.heartbeat()).
+
+Disk Footprint: ~64KB (Base SQLite metadata overhead before ingestion).
+
+### Observations
+Relational Parallels: The transition was smoothed by treating "Collections" as Tables and "Metadata" as indexed WHERE clauses.
+
+TDD Rigor: Breaking the "Combat Test" into four discrete units (Persistence, Heartbeat, Collection Integrity, and Type Integrity) allowed for much faster mypy validation.
+
+Git Hygiene: Explicitly added chroma_db/ to .gitignore to prevent binary bloat in the repository while keeping the ingestion pipeline reproducible.
+
+Updated Milestones
+[x] Issue #2: Walking Skeleton / Inception.
+
+[x] Subissue 2.0: Recursive Chunking logic.
+
+[x] Subissue 2.1: Chroma DB Infrastructure.
+
+[ ] Subissue 2.2: Embedding Generation (Integrating the LLM transformer).
+
+Next Step
+With the infrastructure live and the journal updated, we are ready for Subissue 1.2. This is where we choose our "Brain"—the model that turns your SEC chunks into vectors.
