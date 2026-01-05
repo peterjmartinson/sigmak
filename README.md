@@ -9,7 +9,7 @@ high-dimensional vector space for semantic analysis.
 
 ## System Architecture
 
-The application follows a modular "Extraction-to-Storage" flow:
+The application follows a modular "Extraction-to-Storage" flow with **asynchronous task processing**:
 
 1. **Ingestion Engine (`ingest.py`)**: Parses raw SEC HTM files using BeautifulSoup (lxml). It features robust encoding fallbacks (UTF-8/CP1252) and regex-based slicing to isolate "Item 1A."
 2. **Processing Layer (`processing.py`)**: Implements recursive character text splitting. Chunks are normalized to ~800 characters with an 80-character overlap to preserve semantic context.
@@ -19,6 +19,8 @@ The application follows a modular "Extraction-to-Storage" flow:
 6. **Risk Classification (`risk_taxonomy.py`, `prompt_manager.py`)**: Proprietary 10-category risk taxonomy with version-controlled LLM prompts for semantic classification.
 7. **Risk Scoring (`scoring.py`)**: Quantifies **Severity** (0.0-1.0) and **Novelty** (0.0-1.0) for risk disclosures using keyword analysis and semantic comparison with historical filings. Every score includes full source citation and human-readable explanation.
 8. **Orchestration Layer (`indexing_pipeline.py`)**: End-to-end pipeline coordinator that integrates extraction, chunking, embedding, storage, and hybrid search with optional reranking.
+9. **Async Task Queue (`tasks.py`)**: Celery + Redis background task processor for non-blocking API operations. All slow operations (ingestion, scoring) run in worker processes with progress tracking.
+10. **REST API (`api.py`)**: FastAPI server with async endpoints, authentication, rate limiting, and real-time task status polling.
 
 ### Risk Taxonomy
 
@@ -263,23 +265,53 @@ print(f"Chunks indexed: {result.metadata['chunks_indexed']}")
 
 ## REST API
 
-The system exposes a FastAPI REST interface for production deployments.
+The system exposes a FastAPI REST interface with **asynchronous task processing** for production deployments.
 
-### Starting the Server
+### Architecture: Async Task Queue
+
+**Why Async?** Analysis tasks can take 5-30 seconds depending on filing size. Synchronous endpoints would block the API server, limiting throughput to 1-2 requests per second. With Celery + Redis, the API responds instantly (< 100ms) and processes tasks in parallel background workers.
+
+**Components**:
+- **FastAPI Server**: Accepts requests, validates input, submits tasks
+- **Redis Broker**: Message queue for task distribution
+- **Celery Workers**: Process tasks in parallel (scalable)
+- **Redis Backend**: Stores task results and progress
+
+**Task States**:
+1. **PENDING**: Task queued but not started
+2. **PROGRESS**: Task running (with progress updates)
+3. **SUCCESS**: Task completed successfully
+4. **FAILURE**: Task failed with error details
+
+### Starting the System
 
 ```bash
-# Development mode (auto-reload)
-uv run uvicorn sec_risk_api.api:app --reload
+# 1. Start Redis (message broker)
+redis-server
 
-# Production mode
-uv run uvicorn sec_risk_api.api:app --host 0.0.0.0 --port 8000
+# 2. Start Celery worker (in separate terminal)
+celery -A sec_risk_api.tasks worker --loglevel=info
+
+# 3. Start API server (in separate terminal)
+uv run uvicorn sec_risk_api.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Production Deployment**:
+```bash
+# Run multiple workers for horizontal scaling
+celery -A sec_risk_api.tasks worker --concurrency=4 --loglevel=info
+
+# Optional: Use Flower for monitoring
+celery -A sec_risk_api.tasks flower
 ```
 
 ### API Endpoints
 
-#### POST /analyze
+#### POST /analyze (Async)
 
-Analyze an SEC filing and return risk scores.
+Submit an analysis task and receive a task_id for polling.
+
+**Authentication**: Requires `X-API-Key` header (see Authentication section below)
 
 **Request Body**:
 ```json
@@ -301,41 +333,19 @@ Or use a file path:
 }
 ```
 
-**Response**:
+**Response (HTTP 202 Accepted)**:
 ```json
 {
-  "ticker": "AAPL",
-  "filing_year": 2025,
-  "risks": [
-    {
-      "text": "Supply chain disruptions could materially impact...",
-      "source_citation": "Supply chain disruptions...",
-      "severity": {
-        "value": 0.75,
-        "explanation": "High severity due to keywords: severe, disruption"
-      },
-      "novelty": {
-        "value": 0.82,
-        "explanation": "High novelty - semantically distinct from 2024 filing"
-      },
-      "metadata": {
-        "ticker": "AAPL",
-        "filing_year": 2025,
-        "item_type": "Item 1A"
-      }
-    }
-  ],
-  "metadata": {
-    "total_latency_ms": 2534.5,
-    "chunks_indexed": 5
-  }
+  "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status_url": "/tasks/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "message": "Analysis task submitted successfully"
 }
 ```
 
 **Example - cURL**:
 ```bash
-# With HTML content
 curl -X POST "http://localhost:8000/analyze" \
+  -H "X-API-Key: your-api-key-here" \
   -H "Content-Type: application/json" \
   -d '{
     "ticker": "AAPL",
@@ -343,67 +353,182 @@ curl -X POST "http://localhost:8000/analyze" \
     "html_content": "<html>...</html>",
     "retrieve_top_k": 5
   }'
-
-# With file path
-curl -X POST "http://localhost:8000/analyze" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticker": "AAPL",
-    "filing_year": 2025,
-    "html_path": "data/sample_10k.html",
-    "retrieve_top_k": 5
-  }'
 ```
 
 **Example - Python**:
 ```python
 import requests
+import time
 
-# With HTML content
-with open("data/sample_10k.html", encoding="cp1252") as f:
-    html_content = f.read()
+# Submit analysis task
+response = requests.post(
+    "http://localhost:8000/analyze",
+    headers={"X-API-Key": "your-api-key-here"},
+    json={
+        "ticker": "AAPL",
+        "filing_year": 2025,
+        "html_path": "data/sample_10k.html",
+        "retrieve_top_k": 10
+    }
+)
 
-response = requests.post("http://localhost:8000/analyze", json={
-    "ticker": "AAPL",
-    "filing_year": 2025,
-    "html_content": html_content,
-    "retrieve_top_k": 10
-})
+task_id = response.json()["task_id"]
+print(f"Task submitted: {task_id}")
 
-data = response.json()
-for risk in data["risks"]:
-    print(f"Severity: {risk['severity']['value']:.2f}")
-    print(f"Novelty: {risk['novelty']['value']:.2f}")
-    print(f"Text: {risk['text'][:100]}...\n")
-
-# With file path (server must have access to file)
-response = requests.post("http://localhost:8000/analyze", json={
-    "ticker": "AAPL",
-    "filing_year": 2025,
-    "html_path": "/path/to/filing.html"
-})
+# Poll for results
+while True:
+    status_response = requests.get(
+        f"http://localhost:8000/tasks/{task_id}",
+        headers={"X-API-Key": "your-api-key-here"}
+    )
+    
+    status_data = status_response.json()
+    
+    if status_data["status"] == "SUCCESS":
+        result = status_data["result"]
+        print(f"Analysis complete! {len(result['risks'])} risks found")
+        break
+    elif status_data["status"] == "FAILURE":
+        print(f"Task failed: {status_data['error']}")
+        break
+    elif status_data["status"] == "PROGRESS":
+        progress = status_data["progress"]
+        print(f"Progress: {progress['current']}/{progress['total']} - {progress['status']}")
+    
+    time.sleep(2)  # Poll every 2 seconds
 ```
+
+#### GET /tasks/{task_id}
+
+Poll task status and retrieve results when complete.
+
+**Authentication**: Requires `X-API-Key` header
+
+**Response (PENDING)**:
+```json
+{
+  "task_id": "a1b2c3d4-...",
+  "status": "PENDING",
+  "progress": null,
+  "result": null,
+  "error": null
+}
+```
+
+**Response (PROGRESS)**:
+```json
+{
+  "task_id": "a1b2c3d4-...",
+  "status": "PROGRESS",
+  "progress": {
+    "current": 3,
+    "total": 5,
+    "status": "Computing severity scores..."
+  },
+  "result": null,
+  "error": null
+}
+```
+
+**Response (SUCCESS)**:
+```json
+{
+  "task_id": "a1b2c3d4-...",
+  "status": "SUCCESS",
+  "progress": null,
+  "result": {
+    "ticker": "AAPL",
+    "filing_year": 2025,
+    "risks": [
+      {
+        "text": "Supply chain disruptions could materially impact...",
+        "source_citation": "Supply chain disruptions...",
+        "severity": {
+          "value": 0.75,
+          "explanation": "High severity due to keywords: severe, disruption"
+        },
+        "novelty": {
+          "value": 0.82,
+          "explanation": "High novelty - semantically distinct from 2024 filing"
+        },
+        "metadata": {
+          "ticker": "AAPL",
+          "filing_year": 2025,
+          "item_type": "Item 1A"
+        }
+      }
+    ],
+    "metadata": {
+      "total_latency_ms": 2534.5,
+      "chunks_indexed": 5
+    }
+  },
+  "error": null
+}
+```
+
+**Response (FAILURE)**:
+```json
+{
+  "task_id": "a1b2c3d4-...",
+  "status": "FAILURE",
+  "progress": null,
+  "result": null,
+  "error": "File not found: /path/to/filing.html"
+}
+```
+
+#### POST /index (Async)
+
+Submit an indexing task (no scoring, just ingestion into vector DB).
+
+**Authentication**: Requires `X-API-Key` header
+
+**Response**: Same format as POST /analyze (returns task_id)
+
+**Use Case**: Bulk ingestion of filings for later analysis.
 
 #### GET /health
 
-Health check endpoint.
+Health check endpoint (no authentication required).
 
 **Response**:
 ```json
 {
   "status": "healthy",
-  "version": "0.1.0",
-  "vector_db_initialized": true
+  "version": "1.0.0"
 }
 ```
 
-#### GET /openapi.json
+### Authentication & Rate Limiting
 
-Auto-generated OpenAPI schema for API documentation.
+**API Keys**: All endpoints (except /health) require authentication.
 
-**Interactive Documentation**:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+**Creating API Keys**:
+```python
+from sec_risk_api.auth import APIKeyManager
+
+manager = APIKeyManager()
+
+# Create API key with rate limit
+api_key = manager.create_api_key(user="client_name", rate_limit="10/minute")
+print(f"API Key: {api_key}")
+
+# Keys are stored in api_keys.json
+```
+
+**Rate Limits**:
+- Default: 10 requests/minute per API key
+- Configurable per-user via `rate_limit` parameter
+- Exceeding limit returns HTTP 429 (Too Many Requests)
+
+**Request Headers**:
+```bash
+curl -X POST "http://localhost:8000/analyze" \
+  -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '...'
+```
 
 ### Validation Rules
 
