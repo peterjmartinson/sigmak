@@ -1,3 +1,166 @@
+## [2026-01-05] Issue #4.3: Async Task Queue with Celery + Redis (COMPLETED)
+
+### Status: COMPLETED ✓
+
+### Summary
+Implemented comprehensive asynchronous task queue system using Celery + Redis to ensure API endpoints respond instantly without blocking on long-running operations. All slow tasks (filing ingestion, risk analysis) now run in background workers with reliable status/progress tracking.
+
+### Technical Implementation
+
+**Core Components**:
+- `tasks.py`: Celery task definitions with progress tracking
+- Updated `api.py`: Async endpoints returning task_id immediately
+- Task status endpoints: Real-time progress and result polling
+- Redis broker: Message queue and result backend
+
+**Architecture**:
+1. **Celery Configuration**:
+   - Broker: Redis (default: redis://localhost:6379/0)
+   - Backend: Redis for result storage
+   - Serialization: JSON (task_serializer, result_serializer)
+   - Task tracking: `task_track_started=True`
+   - Crash recovery: `task_acks_late=True` (tasks not lost on worker crash)
+   - Worker config: `prefetch_multiplier=1` (process one task at a time)
+   - Result expiration: 1 hour (configurable)
+
+2. **Task Definitions**:
+   - **analyze_filing_task**: Full analysis pipeline (ingest → index → score)
+   - **index_filing_task**: Indexing only (ingest → chunk → embed → store)
+   - **batch_analyze_task**: Batch processing multiple filings
+   - All tasks: max_retries=3, exponential backoff, crash recovery
+
+3. **Progress Tracking**:
+   - Custom `CallbackTask` base class
+   - `update_progress()` method for real-time status updates
+   - Progress state: `{current, total, status: "message"}`
+   - Task states: PENDING → PROGRESS → SUCCESS/FAILURE
+
+4. **API Endpoints**:
+   - **POST /analyze**: Returns task_id immediately (HTTP 202)
+   - **POST /index**: Background indexing, returns task_id
+   - **GET /tasks/{task_id}**: Poll task status and retrieve results
+   - Backward compatibility: Sync mode available via `async_mode=False`
+
+5. **Error Handling**:
+   - Recoverable errors (ConnectionError, TimeoutError): Auto-retry with exponential backoff
+   - Non-recoverable errors (IntegrationError): Fail immediately, no retry
+   - Queue unavailable: Return HTTP 503 with clear message
+   - Task failure tracking: Error details stored in result backend
+
+### Test Coverage: 13 Unit Tests (All Passing ✅)
+
+**Test Class 1: APIImmediateResponse** (2 tests)
+- ✅ POST /analyze returns task_id within 100ms
+- ✅ POST /index returns task_id immediately
+
+**Test Class 2: TaskStatusReporting** (4 tests)
+- ✅ GET /tasks/{id} returns PENDING state
+- ✅ GET /tasks/{id} returns PROGRESS with progress info
+- ✅ GET /tasks/{id} returns SUCCESS with full result
+- ✅ GET /tasks/{id} returns FAILURE with error details
+
+**Test Class 3: QueueFailureRecovery** (4 tests)
+- ✅ Task retries on Redis connection error
+- ✅ Task returns FAILURE after max retries exhausted
+- ✅ Worker recovers from crash (acks_late=True)
+- ✅ API returns 503 when Redis unavailable
+
+**Test Class 4: EndToEndIntegration** (3 tests)
+- ✅ Complete workflow: POST /analyze → poll /tasks/{id} → SUCCESS
+- ✅ Multiple concurrent tasks with unique task_ids
+- ✅ Task result polling pattern (PENDING → PROGRESS → SUCCESS)
+
+### Success Criteria Met:
+1. ✅ **Non-blocking API**: All endpoints return within 100ms
+2. ✅ **Reliable status reporting**: Real-time progress tracking with 5 states
+3. ✅ **Crash recovery**: Tasks not lost on worker failure (acks_late=True)
+4. ✅ **Error handling**: Exponential backoff retry for transient failures
+5. ✅ **Documentation**: JOURNAL.md and README.md updated
+
+### Usage Examples:
+
+**Start Celery Worker**:
+```bash
+# Start Redis
+redis-server
+
+# Start Celery worker
+celery -A sec_risk_api.tasks worker --loglevel=info
+
+# Start API server
+uvicorn sec_risk_api.api:app --reload
+```
+
+**Submit Async Analysis**:
+```bash
+curl -X POST "http://localhost:8000/analyze" \
+     -H "X-API-Key: your-api-key" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "ticker": "AAPL",
+       "filing_year": 2025,
+       "html_content": "<html>...</html>"
+     }'
+
+# Response (HTTP 202):
+{
+  "task_id": "a1b2c3d4-...",
+  "status_url": "/tasks/a1b2c3d4-...",
+  "message": "Analysis task submitted successfully"
+}
+```
+
+**Poll Task Status**:
+```bash
+curl -X GET "http://localhost:8000/tasks/a1b2c3d4-..." \
+     -H "X-API-Key: your-api-key"
+
+# Response (PROGRESS):
+{
+  "task_id": "a1b2c3d4-...",
+  "status": "PROGRESS",
+  "progress": {
+    "current": 3,
+    "total": 5,
+    "status": "Computing severity scores..."
+  }
+}
+
+# Response (SUCCESS):
+{
+  "task_id": "a1b2c3d4-...",
+  "status": "SUCCESS",
+  "result": {
+    "ticker": "AAPL",
+    "filing_year": 2025,
+    "risks": [...]
+  }
+}
+```
+
+### Files Modified:
+- ✅ `src/sec_risk_api/tasks.py` (NEW): Celery task definitions
+- ✅ `src/sec_risk_api/api.py`: Added async endpoints and status polling
+- ✅ `tests/test_async_task_queue.py` (NEW): 13 comprehensive tests
+- ✅ `pyproject.toml`: Added celery>=5.3.0, redis>=5.0.0 dependencies
+- ✅ `JOURNAL.md`: This entry
+- ✅ `README.md`: Updated architecture and usage sections
+
+### Performance Characteristics:
+- **API response time**: < 100ms (measured in tests)
+- **Worker throughput**: Configurable (default: 1 task at a time per worker)
+- **Scalability**: Horizontal scaling via multiple workers
+- **Result persistence**: 1 hour (configurable via result_expires)
+- **Retry behavior**: 3 attempts with exponential backoff (60s, 120s, 240s)
+
+### Next Steps:
+- Consider Flower UI for Celery monitoring
+- Add Prometheus metrics for task queue depth and latency
+- Implement webhook notifications for task completion
+- Add batch result aggregation endpoint
+
+---
+
 ## [2026-01-05] Issue #25: API Key Management & Rate Limiting (COMPLETED)
 
 ### Status: COMPLETED ✓
