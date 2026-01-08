@@ -1,3 +1,93 @@
+## [2026-01-07] Bug Fix: Item 1A Extraction Capturing TOC Instead of Content (COMPLETED)
+
+### Status: COMPLETED ✓
+
+### Problem
+The `slice_risk_factors()` function in the ingestion pipeline was extracting Table of Contents (TOC) entries instead of actual Item 1A risk factor content. This resulted in:
+- Only 1 chunk indexed per filing (expected: 50-200 chunks)
+- Meaningless text like "Item 1A. Risk Factors 14" or "Item 1A. Risk Factors Pages 31 - 46"
+- Zero useful risk analysis across all tested filings (Tesla, Intel, Franklin Covey, Simple Foods)
+
+**Root Cause**: The regex pattern matched BOTH TOC entries and actual section headers, and the code used `matches[0]` which always picked the TOC entry (appearing first in the document).
+
+### Solution Implemented
+
+**Updated `slice_risk_factors()` logic** ([src/sec_risk_api/ingest.py](src/sec_risk_api/ingest.py)):
+1. Find ALL occurrences of "ITEM 1A.*RISK FACTORS" pattern
+2. For each match, sample 500 characters ahead
+3. Apply heuristic: Real sections have >20 words following (prose), TOC entries have minimal text
+4. Select the match with the longest substantive section length
+5. Fall back to first match if heuristics fail
+
+**Key Code Changes**:
+```python
+# NEW: Find all matches and pick longest substantive section
+for match in matches:
+    sample = text[match.end():match.end() + 500]
+    word_count = len(sample.split())
+
+    if word_count > 20:  # At least 20 words = likely real content
+        section_length = calculate_section_length(match)
+        if section_length > max_length:
+            max_length = section_length
+            best_match = match
+```
+
+### Results
+
+**Before Fix**:
+- Tesla 2022: 1 chunk, text = "Item 1A. Risk Factors 14"
+- Intel 2024: 1 chunk, text = "Item 1A. Risk Factors Pages 31 - 46"
+
+**After Fix**:
+- Tesla 2022: **127 chunks**, 82,556 chars of actual risk content
+- Extraction includes: supply chain risks, regulatory compliance, international operations, pandemic impacts
+- Severity scores range: 0.07 - 0.72 (real distribution, not all zeros)
+
+### Test Coverage
+
+**Added Test** ([tests/test_ingestion.py](tests/test_ingestion.py)):
+```python
+def test_slice_risk_factors_skips_toc_entry():
+    """Verify extraction skips TOC and captures actual content section."""
+    # Simulates TOC entry followed by real section
+    # Asserts: length > 500 chars, contains prose, excludes TOC
+```
+
+**All Tests Pass** (6/6): ✅
+- `test_parse_sec_html_removes_scripts`
+- `test_parse_sec_html_separates_tags`
+- `test_extract_text_from_file_handles_encoding`
+- `test_slice_risk_factors_isolates_content`
+- `test_slice_risk_factors_fallback_on_no_match`
+- `test_slice_risk_factors_skips_toc_entry` (NEW)
+
+### Verification
+
+Tested with real Tesla 2022 10-K filing:
+```bash
+uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
+```
+
+Output:
+- ✅ Chunks Indexed: 127 (previously: 1)
+- ✅ Risk section: 82,556 chars (previously: ~20)
+- ✅ Severity scores: 0.07 - 0.72 with meaningful explanations
+- ✅ Actual risk text about COVID-19, supply chains, manufacturing, regulatory compliance
+
+### Files Modified
+- [`src/sec_risk_api/ingest.py`](src/sec_risk_api/ingest.py) (lines 59-90): Updated `slice_risk_factors()` with multi-match heuristic
+- [`tests/test_ingestion.py`](tests/test_ingestion.py): Added `test_slice_risk_factors_skips_toc_entry()`
+
+### Impact
+This fix enables the entire risk analysis pipeline to function correctly. Users can now:
+1. Index real risk disclosures (50-200 chunks per filing vs 1)
+2. Get meaningful severity/novelty scores
+3. Search and compare risks across years
+4. Build historical context for novelty detection
+
+---
+
 ## [2026-01-06] Issue #4.3: Cloud Hosting and Monitoring (COMPLETED)
 
 ### Status: COMPLETED ✓
@@ -193,7 +283,7 @@ docker-compose down
 
 2. **JSON Logging**: All logs are JSON-formatted for easy ingestion by log aggregators. Compatible with ELK stack, CloudWatch Logs, Datadog.
 
-3. **Health vs Readiness**: 
+3. **Health vs Readiness**:
    - /health: Fast check, always returns 200 if process alive
    - /ready: Slow check, verifies all dependencies (Redis, ChromaDB)
    - /live: Fast check for Kubernetes liveness probe
@@ -467,7 +557,7 @@ Implemented API key authentication and per-user rate limiting to protect from ex
 
 ### Success Conditions Verified
 
-✓ **API rejects unauthorized requests**: 
+✓ **API rejects unauthorized requests**:
   - Missing API key returns 401/422
   - Invalid API key returns 401
   - All tests pass validation
@@ -666,7 +756,7 @@ Implemented production-ready REST API using FastAPI with full Pydantic validatio
 ### Bug Fixes
 1. **Encoding Issue**: Tests failing due to CP1252 encoding in sample_10k.html
    - Fixed: Added `encoding='cp1252'` to all `read_text()` calls in tests
-   
+
 2. **HTTPException Handling**: 404 errors caught by generic `except Exception`, returned as 500
    - Fixed: Added `except HTTPException: raise` before catch-all to preserve error codes
 
@@ -792,7 +882,7 @@ Implemented the end-to-end "Walking Skeleton" integration pipeline that orchestr
 - All nested structures serializable
 - Configurable indentation
 
-✓ **Historical Comparison**: 
+✓ **Historical Comparison**:
 - First filing → novelty = 1.0 (no history)
 - Identical content → novelty < 0.3 (low)
 - Novel content → novelty > 0.7 (high)
@@ -1569,7 +1659,7 @@ Requirements:
 
 ✓ **Source Citation Required**: Prompt explicitly demands `evidence` field with quoted text
 
-✓ **Clear File Structure**: 
+✓ **Clear File Structure**:
   - `prompts/` directory with README, CHANGELOG, versioned prompts
   - Documented in project README.md
 
