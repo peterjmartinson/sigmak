@@ -87,7 +87,36 @@ Initialize the vector database infrastructure:
 uv run init_vector_db.py
 ```
 
-### Indexing a Filing
+### Quick Start: Analyze a Filing
+
+The fastest way to analyze a SEC filing is with the CLI utility:
+
+```bash
+# Download a 10-K HTML filing from SEC EDGAR
+# Example: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001318605&type=10-K
+# Save the main .htm file (NOT the -index.htm) to data/filings/
+
+# Analyze the filing
+uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
+```
+
+**Output**:
+- ✅ Chunks indexed (e.g., 127 chunks from Tesla 2022)
+- ✅ Top 5 risks with severity/novelty scores
+- ✅ JSON export: `results_TSLA_2022.json`
+- ✅ Persistent vector DB for future searches
+
+**Batch Analysis**:
+```bash
+# Analyze multiple years for historical comparison
+uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
+uv run python analyze_filing.py data/filings/tsla-20231231.html TSLA 2023
+uv run python analyze_filing.py data/filings/tsla-20241231.htm TSLA 2024
+```
+
+**Note**: Novelty scores improve with more historical data. The first filing gets novelty=1.0 (no baseline), subsequent years show real novelty detection by comparing against prior filings.
+
+### Indexing a Filing (Programmatic)
 
 Index a 10-K HTML filing into the vector database:
 
@@ -381,9 +410,9 @@ while True:
         f"http://localhost:8000/tasks/{task_id}",
         headers={"X-API-Key": "your-api-key-here"}
     )
-    
+
     status_data = status_response.json()
-    
+
     if status_data["status"] == "SUCCESS":
         result = status_data["result"]
         print(f"Analysis complete! {len(result['risks'])} risks found")
@@ -394,7 +423,7 @@ while True:
     elif status_data["status"] == "PROGRESS":
         progress = status_data["progress"]
         print(f"Progress: {progress['current']}/{progress['total']} - {progress['status']}")
-    
+
     time.sleep(2)  # Poll every 2 seconds
 ```
 
@@ -665,7 +694,7 @@ cat > /etc/nginx/sites-available/sec-risk-api <<'EOF'
 server {
     listen 80;
     server_name your-domain.com;
-    
+
     location / {
         proxy_pass http://localhost:8000;
         proxy_set_header Host $host;
