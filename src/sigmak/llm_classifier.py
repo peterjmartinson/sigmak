@@ -21,7 +21,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 import google.generativeai as genai
 
@@ -191,7 +191,7 @@ class GeminiClassifier:
         
         return result
     
-    def _call_gemini_with_retry(self, prompt: str) -> genai.types.GenerateContentResponse:  # type: ignore
+    def _call_gemini_with_retry(self, prompt: str) -> Any:
         """
         Call Gemini API with exponential backoff retry logic.
         
@@ -238,7 +238,7 @@ class GeminiClassifier:
     
     def _parse_response(
         self,
-        response: genai.types.GenerateContentResponse,  # type: ignore
+        response: Any,
         response_time_ms: float
     ) -> LLMClassificationResult:
         """
