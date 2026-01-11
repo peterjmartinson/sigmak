@@ -233,6 +233,8 @@ class LLMStorage:
                     f"category={record.category.value}, confidence={record.confidence:.2f}"
                 )
                 
+                # lastrowid should always be an int after successful insert
+                assert isinstance(record_id, int), "Failed to get record ID after insert"
                 return record_id
         
         except Exception as e:
@@ -347,7 +349,10 @@ class LLMStorage:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM llm_classifications")
-            return cursor.fetchone()[0]
+            result = cursor.fetchone()
+            if result is None:
+                return 0
+            return int(result[0])
     
     def get_category_counts(self) -> Dict[str, int]:
         """
