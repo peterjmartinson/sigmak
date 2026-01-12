@@ -51,7 +51,7 @@ def main():
                 print(f"     {risk['text'][:150]}...")
             
             # Save results
-            output_file = f"results_{ticker}_{year}.json"
+            output_file = f"output/results_{ticker}_{year}.json"
             with open(output_file, 'w') as f:
                 f.write(result.to_json())
             print(f"\n💾 Saved: {output_file}")

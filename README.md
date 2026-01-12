@@ -7,6 +7,14 @@
 filings, extracts specific risk sections, and indexes them into a
 high-dimensional vector space for semantic analysis.
 
+## Key Features
+
+- **Hybrid Risk Classification**: Combines vector search with LLM fallback for confident classification
+- **Smart LLM Caching**: Stores all LLM responses to reduce future API costs
+- **Threshold-Based Routing**: Automatic fallback to Gemini 2.5 Flash Lite for low-confidence matches
+- **Full Provenance Tracking**: Every classification includes method, confidence, and model version
+- **Async Task Processing**: Non-blocking API with Celery + Redis for production deployments
+
 ## System Architecture
 
 The application follows a modular "Extraction-to-Storage" flow with **asynchronous task processing**:
@@ -17,10 +25,11 @@ The application follows a modular "Extraction-to-Storage" flow with **asynchrono
 4. **The Vault (`init_vector_db.py`)**: A persistent **Chroma DB** instance utilizing **HNSW** indexing with a **Cosine Similarity** metric. Storage path: `./chroma_db/`
 5. **Reranking Layer (`reranking.py`)**: Cross-encoder model (`ms-marco-MiniLM-L-6-v2`) that reranks search results for improved relevance. Processes query-document pairs jointly for superior accuracy.
 6. **Risk Classification (`risk_taxonomy.py`, `prompt_manager.py`)**: Proprietary 10-category risk taxonomy with version-controlled LLM prompts for semantic classification.
-7. **Risk Scoring (`scoring.py`)**: Quantifies **Severity** (0.0-1.0) and **Novelty** (0.0-1.0) for risk disclosures using keyword analysis and semantic comparison with historical filings. Every score includes full source citation and human-readable explanation.
-8. **Orchestration Layer (`indexing_pipeline.py`)**: End-to-end pipeline coordinator that integrates extraction, chunking, embedding, storage, and hybrid search with optional reranking.
-9. **Async Task Queue (`tasks.py`)**: Celery + Redis background task processor for non-blocking API operations. All slow operations (ingestion, scoring) run in worker processes with progress tracking.
-10. **REST API (`api.py`)**: FastAPI server with async endpoints, authentication, rate limiting, and real-time task status polling.
+7. **LLM Integration (`llm_classifier.py`, `llm_storage.py`, `risk_classifier.py`)**: Gemini 2.5 Flash Lite integration with threshold-based routing, intelligent caching, and full provenance tracking. Automatically falls back to LLM when vector search confidence is below 0.64, uses LLM confirmation for scores between 0.64-0.80, and directly uses vector results for scores ≥ 0.80.
+8. **Risk Scoring (`scoring.py`)**: Quantifies **Severity** (0.0-1.0) and **Novelty** (0.0-1.0) for risk disclosures using keyword analysis and semantic comparison with historical filings. Every score includes full source citation and human-readable explanation.
+9. **Orchestration Layer (`indexing_pipeline.py`)**: End-to-end pipeline coordinator that integrates extraction, chunking, embedding, storage, and hybrid search with optional reranking.
+10. **Async Task Queue (`tasks.py`)**: Celery + Redis background task processor for non-blocking API operations. All slow operations (ingestion, scoring) run in worker processes with progress tracking.
+11. **REST API (`api.py`)**: FastAPI server with async endpoints, authentication, rate limiting, and real-time task status polling.
 
 ### Risk Taxonomy
 
@@ -97,7 +106,7 @@ The fastest way to analyze a SEC filing is with the CLI utility:
 # Save the main .htm file (NOT the -index.htm) to data/filings/
 
 # Analyze the filing
-uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
+uv run python scripts/analyze_filing.py --ticker TSLA --year 2022
 ```
 
 **Output**:
@@ -106,13 +115,14 @@ uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
 - ✅ JSON export: `results_TSLA_2022.json`
 - ✅ Persistent vector DB for future searches
 
-**Batch Analysis**:
+**Year-over-Year Comparison**:
 ```bash
-# Analyze multiple years for historical comparison
-uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
-uv run python analyze_filing.py data/filings/tsla-20231231.html TSLA 2023
-uv run python analyze_filing.py data/filings/tsla-20241231.htm TSLA 2024
+# Generate a YoY risk analysis report for multiple years
+# Note: Filing HTM files should be in data/filings/ (e.g., hurc-20231031x10k.htm)
+uv run python scripts/generate_yoy_report.py --ticker HURC --years 2023 2024 2025
 ```
+
+**Output**: `output/HURC_YoY_Risk_Analysis_2023_2025.md`
 
 **Note**: Novelty scores improve with more historical data. The first filing gets novelty=1.0 (no baseline), subsequent years show real novelty detection by comparing against prior filings.
 
