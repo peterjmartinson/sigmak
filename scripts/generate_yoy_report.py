@@ -20,12 +20,17 @@ Example:
 """
 
 import sys
+import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
 import json
 from collections import defaultdict
+from dotenv import load_dotenv
 from sigmak.integration import IntegrationPipeline, RiskAnalysisResult
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def load_or_analyze_filing(
@@ -33,7 +38,8 @@ def load_or_analyze_filing(
     html_path: str,
     ticker: str,
     year: int,
-    retrieve_top_k: int = 10
+    retrieve_top_k: int = 10,
+    use_llm: bool = False
 ) -> RiskAnalysisResult:
     """
     Load cached results or analyze filing fresh.
@@ -44,14 +50,15 @@ def load_or_analyze_filing(
         ticker: Stock ticker symbol
         year: Filing year
         retrieve_top_k: Number of top risks to retrieve
+        use_llm: Whether LLM classification is enabled (bypasses cache)
         
     Returns:
         RiskAnalysisResult with full risk analysis
     """
     cache_file = Path(f"output/results_{ticker}_{year}.json")
     
-    # Try to load from cache
-    if cache_file.exists():
+    # Skip cache when LLM is enabled to ensure fresh enrichment
+    if not use_llm and cache_file.exists():
         print(f"📂 Loading cached results for {ticker} {year}...")
         with open(cache_file, 'r') as f:
             data = json.load(f)
@@ -272,46 +279,6 @@ def suggest_categories_from_keywords(risk_text: str) -> Tuple[List[str], List[st
     return detected_keywords[:3], suggested_categories  # Return max 3 keywords
 
 
-def suggest_categories_from_keywords(risk_text: str) -> Tuple[List[str], List[str]]:
-    """
-    Suggest categories based on keyword matches in risk text.
-    
-    Args:
-        risk_text: Risk disclosure text
-        
-    Returns:
-        Tuple of (detected_keywords, suggested_categories)
-    """
-    text_lower = risk_text.lower()
-    
-    category_keywords = {
-        'GEOPOLITICAL': ['tariff', 'trade', 'international', 'export', 'import', 'sanctions', 'war', 'political'],
-        'OPERATIONAL': ['supply chain', 'supplier', 'manufacturing', 'production', 'facilities', 'operations'],
-        'FINANCIAL': ['debt', 'liquidity', 'credit', 'capital', 'cash flow', 'interest'],
-        'REGULATORY': ['regulation', 'compliance', 'law', 'government', 'sec', 'regulatory'],
-        'COMPETITIVE': ['competition', 'competitor', 'market share', 'pricing', 'rival'],
-        'TECHNOLOGICAL': ['technology', 'cyber', 'digital', 'it', 'systems', 'innovation'],
-        'HUMAN_CAPITAL': ['employee', 'talent', 'workforce', 'labor', 'personnel', 'hiring'],
-        'REPUTATIONAL': ['reputation', 'brand', 'customer', 'trust', 'image'],
-        'SYSTEMATIC': ['economic', 'recession', 'inflation', 'market', 'macro']
-    }
-    
-    detected_keywords = []
-    category_scores = {}
-    
-    for category, keywords in category_keywords.items():
-        matches = [kw for kw in keywords if kw in text_lower]
-        if matches:
-            category_scores[category] = len(matches)
-            detected_keywords.extend(matches[:3])  # Limit to first 3 per category
-    
-    # Get top 2 suggested categories
-    suggested = sorted(category_scores.items(), key=lambda x: x[1], reverse=True)[:2]
-    suggested_categories = [cat for cat, _ in suggested]
-    
-    return detected_keywords[:3], suggested_categories  # Return max 3 keywords
-
-
 def load_filing_provenance(ticker: str, filing_year: int) -> Dict[str, str]:
     """
     Load filing provenance metadata from JSON file if available.
@@ -348,7 +315,7 @@ def load_filing_provenance(ticker: str, filing_year: int) -> Dict[str, str]:
                 try:
                     with open(matches[0], 'r') as f:
                         data = json.load(f)
-                            metadata['accession'] = data.get('accession', '<ACCESSION>')
+                        metadata['accession'] = data.get('accession', '<ACCESSION>')
                         metadata['cik'] = data.get('cik', '<CIK>')
                         metadata['sec_url'] = data.get('sec_url', '<SEC_URL>')
                         return metadata  # Return immediately on first match
@@ -794,17 +761,46 @@ def generate_markdown_report(
 
 def main():
     """Main entry point for report generation."""
-    # Default: HURC filings
-    if len(sys.argv) == 1:
-        ticker = "HURC"
-        years = [2023, 2024, 2025]
-    elif len(sys.argv) == 4:
-        ticker = sys.argv[1].upper()
-        years = [int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])]
-    else:
-        print("Usage: python generate_yoy_report.py [ticker year1 year2 year3]")
-        print("Example: python generate_yoy_report.py HURC 2023 2024 2025")
-        sys.exit(1)
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Generate YoY Risk Analysis Report for SEC 10-K filings",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python generate_yoy_report.py                          # Default: HURC 2023-2025
+  python generate_yoy_report.py TSLA 2022 2023 2024     # Custom ticker and years
+  python generate_yoy_report.py --use-llm               # Enable LLM classification
+  python generate_yoy_report.py HURC 2023 2024 2025 --use-llm
+        """
+    )
+    parser.add_argument(
+        'ticker',
+        nargs='?',
+        default='HURC',
+        help='Stock ticker symbol (default: HURC)'
+    )
+    parser.add_argument(
+        'years',
+        nargs='*',
+        type=int,
+        help='Filing years (default: 2023 2024 2025)'
+    )
+    parser.add_argument(
+        '--use-llm',
+        action='store_true',
+        help='Enable LLM-based risk classification (increases latency and cost)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Set defaults
+    ticker = args.ticker.upper()
+    years = args.years if args.years else [2023, 2024, 2025]
+    use_llm = args.use_llm
+    
+    # Validate years
+    if len(years) < 2:
+        parser.error("At least 2 years required for YoY comparison")
     
     # Build file paths
     filings = []
@@ -840,10 +836,11 @@ def main():
     print(f"{'='*60}")
     print(f"Company: {ticker}")
     print(f"Years: {', '.join(map(str, years))}")
+    print(f"LLM Classification: {'Enabled' if use_llm else 'Disabled'}")
     print(f"{'='*60}\n")
     
     # Initialize pipeline
-    pipeline = IntegrationPipeline(persist_path="./chroma_db")
+    pipeline = IntegrationPipeline(persist_path="./chroma_db", use_llm=use_llm)
     
     # Analyze each filing
     results = []
@@ -853,7 +850,8 @@ def main():
             html_path=html_path,
             ticker=ticker_sym,
             year=year,
-            retrieve_top_k=10
+            retrieve_top_k=10,
+            use_llm=use_llm
         )
         results.append(result)
     

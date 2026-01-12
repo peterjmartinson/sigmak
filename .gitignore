@@ -220,3 +220,7 @@ output/
 
 # VS Code
 .vscode/*
+
+llm_cache.db
+api_keys.json
+*Zone.Identifier

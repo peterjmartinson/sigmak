@@ -31,6 +31,9 @@ import re
 
 from sigmak.indexing_pipeline import IndexingPipeline
 from sigmak.scoring import RiskScorer, RiskScore
+from sigmak.risk_classifier import RiskClassifierWithLLM
+from sigmak.llm_classifier import GeminiClassifier
+from sigmak.llm_storage import LLMStorage
 
 logger = logging.getLogger(__name__)
 
@@ -134,21 +137,50 @@ class IntegrationPipeline:
     
     def __init__(
         self,
-        persist_path: str = "./chroma_db"
+        persist_path: str = "./chroma_db",
+        use_llm: bool = False
     ) -> None:
         """
         Initialize integration pipeline.
         
         Args:
             persist_path: Path to vector database storage
+            use_llm: Enable LLM-based risk classification (default: False)
         """
         self.persist_path = persist_path
+        self.use_llm = use_llm
         
         # Initialize sub-components
         self.indexing_pipeline = IndexingPipeline(persist_path=persist_path)
         self.scorer = RiskScorer()
         
-        logger.info(f"Initialized IntegrationPipeline with DB at {persist_path}")
+        # Lazy-load classifiers only when needed
+        self._llm_classifier: Optional[RiskClassifierWithLLM] = None
+        self._gemini_classifier: Optional[GeminiClassifier] = None
+        
+        logger.info(f"Initialized IntegrationPipeline with DB at {persist_path}, use_llm={use_llm}")
+    
+    @property
+    def gemini_classifier(self) -> GeminiClassifier:
+        """Lazy-load direct Gemini classifier (bypasses threshold logic)."""
+        if self._gemini_classifier is None:
+            logger.info("Initializing Gemini classifier...")
+            self._gemini_classifier = GeminiClassifier()
+        return self._gemini_classifier
+    
+    @property
+    def llm_classifier(self) -> RiskClassifierWithLLM:
+        """Lazy-load LLM classifier only when needed."""
+        if self._llm_classifier is None:
+            logger.info("Initializing LLM classifier...")
+            llm = GeminiClassifier()
+            storage = LLMStorage()
+            self._llm_classifier = RiskClassifierWithLLM(
+                indexing_pipeline=self.indexing_pipeline,
+                llm_classifier=llm,
+                llm_storage=storage
+            )
+        return self._llm_classifier
     
     # ========================================================================
     # Main Analysis Method
@@ -254,6 +286,21 @@ class IntegrationPipeline:
                     },
                     "metadata": chunk["metadata"]
                 }
+                
+                # Optional: Classify with LLM
+                if self.use_llm:
+                    logger.info(f"Classifying risk with LLM...")
+                    llm_classification = self._classify_risk_with_llm(
+                        chunk=chunk,
+                        vector_metadata=chunk.get("metadata")
+                    )
+                    risk_dict["category"] = llm_classification["category"]
+                    risk_dict["category_confidence"] = llm_classification["confidence"]
+                    risk_dict["classification_method"] = llm_classification["method"]
+                    if llm_classification["llm_result"]:
+                        risk_dict["llm_evidence"] = llm_classification["llm_result"]["evidence"]
+                        risk_dict["llm_rationale"] = llm_classification["llm_result"]["rationale"]
+                
                 risks.append(risk_dict)
                 
             except Exception as e:
@@ -282,6 +329,47 @@ class IntegrationPipeline:
     # ========================================================================
     # Helper Methods
     # ========================================================================
+    
+    def _classify_risk_with_llm(
+        self,
+        chunk: Dict[str, Any],
+        vector_metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Classify risk with LLM (bypassing threshold logic).
+        
+        When use_llm=True, this calls the Gemini classifier directly
+        to ensure LLM classification regardless of vector confidence.
+        
+        Args:
+            chunk: Risk chunk dictionary with 'text' and 'metadata'
+            vector_metadata: Optional metadata from vector search (for future use)
+        
+        Returns:
+            Dictionary with 'category', 'confidence', 'method', 'llm_result'
+        """
+        try:
+            # Call Gemini directly (bypasses vector threshold logic)
+            result = self.gemini_classifier.classify(text=chunk["text"])
+            
+            return {
+                'category': result.category.value,
+                'confidence': result.confidence,
+                'method': 'llm',
+                'llm_result': {
+                    'evidence': result.evidence,
+                    'rationale': result.rationale,
+                    'model_version': result.model_version
+                }
+            }
+        except Exception as e:
+            logger.warning(f"LLM classification failed: {e}")
+            return {
+                'category': 'UNCATEGORIZED',
+                'confidence': 0.0,
+                'method': 'error',
+                'llm_result': None
+            }
     
     def _validate_inputs(
         self,
