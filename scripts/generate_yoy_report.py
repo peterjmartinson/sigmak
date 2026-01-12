@@ -48,7 +48,7 @@ def load_or_analyze_filing(
     Returns:
         RiskAnalysisResult with full risk analysis
     """
-    cache_file = Path(f"results_{ticker}_{year}.json")
+    cache_file = Path(f"output/results_{ticker}_{year}.json")
     
     # Try to load from cache
     if cache_file.exists():
@@ -323,8 +323,8 @@ def load_filing_provenance(ticker: str, filing_year: int) -> Dict[str, str]:
     Returns:
         Dictionary with accession, cik, and sec_url (or placeholders)
     """
-    # Try to find metadata JSON file
-    data_dir = Path("data")
+    # Try to find metadata JSON file (check filings/, data/, and samples/)
+    search_dirs = [Path("data/filings"), Path("data"), Path("data/samples")]
     
     # Common filename patterns
     patterns = [
@@ -338,18 +338,22 @@ def load_filing_provenance(ticker: str, filing_year: int) -> Dict[str, str]:
         'sec_url': '<SEC_URL>'
     }
     
-    for pattern in patterns:
-        matches = list(data_dir.glob(pattern))
-        if matches:
-            try:
-                with open(matches[0], 'r') as f:
-                    data = json.load(f)
-                    metadata['accession'] = data.get('accession', '<ACCESSION>')
-                    metadata['cik'] = data.get('cik', '<CIK>')
-                    metadata['sec_url'] = data.get('sec_url', '<SEC_URL>')
-                    break
-            except (json.JSONDecodeError, IOError):
-                pass
+    # Look for JSON files matching the patterns in all search directories
+    for data_dir in search_dirs:
+        if not data_dir.exists():
+            continue
+        for pattern in patterns:
+            matches = list(data_dir.glob(pattern))
+            if matches:
+                try:
+                    with open(matches[0], 'r') as f:
+                        data = json.load(f)
+                            metadata['accession'] = data.get('accession', '<ACCESSION>')
+                        metadata['cik'] = data.get('cik', '<CIK>')
+                        metadata['sec_url'] = data.get('sec_url', '<SEC_URL>')
+                        return metadata  # Return immediately on first match
+                except (json.JSONDecodeError, IOError):
+                    pass
     
     return metadata
 
@@ -805,12 +809,18 @@ def main():
     # Build file paths
     filings = []
     for year in years:
-        # Try common naming patterns
+        # Try common naming patterns (search filings/ first, then data/, then samples/)
         candidates = [
+            f"data/filings/{ticker.lower()}-{year}1031x10k.htm",
+            f"data/filings/{ticker.lower()}-{year}1231x10k.htm",
+            f"data/filings/{ticker.lower()}-{year}0930x10k.htm",
+            f"data/filings/{ticker.lower()}-{year}0630x10k.htm",
             f"data/{ticker.lower()}-{year}1031x10k.htm",
             f"data/{ticker.lower()}-{year}1231x10k.htm",
             f"data/{ticker.lower()}-{year}0930x10k.htm",
             f"data/{ticker.lower()}-{year}0630x10k.htm",
+            f"data/samples/{ticker.lower()}-{year}1031x10k.htm",
+            f"data/samples/{ticker.lower()}-{year}1231x10k.htm",
         ]
         
         found = False
@@ -852,7 +862,7 @@ def main():
     print("📝 Generating Markdown Report...")
     print(f"{'='*60}\n")
     
-    output_file = f"{ticker}_YoY_Risk_Analysis_{min(years)}_{max(years)}.md"
+    output_file = f"output/{ticker}_YoY_Risk_Analysis_{min(years)}_{max(years)}.md"
     generate_markdown_report(ticker, results, output_file)
     
     print(f"\n{'='*60}")

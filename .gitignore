@@ -211,4 +211,12 @@ __marimo__/
 .sw*
 docs/*
 chroma_db/*
+
+# Downloaded SEC filings (keep data/samples/ tracked for tests)
+data/filings/
+
+# Generated reports and analysis results
+output/
+
+# VS Code
 .vscode/*

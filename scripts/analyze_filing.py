@@ -48,7 +48,7 @@ def main():
         print()
     
     # Save to JSON
-    output_file = f"results_{ticker}_{year}.json"
+    output_file = f"output/results_{ticker}_{year}.json"
     with open(output_file, 'w') as f:
         f.write(result.to_json())
     print(f"💾 Full results saved to: {output_file}")

@@ -106,7 +106,7 @@ The fastest way to analyze a SEC filing is with the CLI utility:
 # Save the main .htm file (NOT the -index.htm) to data/filings/
 
 # Analyze the filing
-uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
+uv run python scripts/analyze_filing.py --ticker TSLA --year 2022
 ```
 
 **Output**:
@@ -115,13 +115,14 @@ uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
 - ✅ JSON export: `results_TSLA_2022.json`
 - ✅ Persistent vector DB for future searches
 
-**Batch Analysis**:
+**Year-over-Year Comparison**:
 ```bash
-# Analyze multiple years for historical comparison
-uv run python analyze_filing.py data/filings/tsla-20221231.htm TSLA 2022
-uv run python analyze_filing.py data/filings/tsla-20231231.html TSLA 2023
-uv run python analyze_filing.py data/filings/tsla-20241231.htm TSLA 2024
+# Generate a YoY risk analysis report for multiple years
+# Note: Filing HTM files should be in data/filings/ (e.g., hurc-20231031x10k.htm)
+uv run python scripts/generate_yoy_report.py --ticker HURC --years 2023 2024 2025
 ```
+
+**Output**: `output/HURC_YoY_Risk_Analysis_2023_2025.md`
 
 **Note**: Novelty scores improve with more historical data. The first filing gets novelty=1.0 (no baseline), subsequent years show real novelty detection by comparing against prior filings.
 
