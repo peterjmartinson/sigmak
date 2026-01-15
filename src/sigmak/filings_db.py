@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 
-DEFAULT_DB_PATH = os.environ.get("SIGMAK_FILINGS_DB", "./database/filings_index.db")
+DEFAULT_DB_PATH = os.environ.get("SIGMAK_FILINGS_DB", "./database/sec_filings.db")
 MISSING_TOKEN = "MISSING_IDENTIFIERS"
 
 
@@ -88,18 +88,41 @@ def get_latest_filing(db_path: str, ticker: str, filing_year: int) -> Optional[F
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT accession, cik, sec_url, filing_date
-            FROM filings_index
-            WHERE ticker = ? AND filing_year = ?
-            ORDER BY
-                CASE WHEN filing_date IS NULL THEN 0 ELSE 1 END DESC,
-                filing_date DESC
-            LIMIT 1
-            """,
-            (ticker.upper(), filing_year),
-        )
+
+        # Detect whether the filings_index table contains a filing_year column.
+        cursor.execute("PRAGMA table_info('filings_index')")
+        cols = [r[1] for r in cursor.fetchall()]
+        has_filing_year = "filing_year" in cols
+
+        if has_filing_year:
+            cursor.execute(
+                """
+                SELECT accession, cik, sec_url, filing_date
+                FROM filings_index
+                WHERE ticker = ? AND filing_year = ?
+                ORDER BY
+                    CASE WHEN filing_date IS NULL THEN 0 ELSE 1 END DESC,
+                    filing_date DESC
+                LIMIT 1
+                """,
+                (ticker.upper(), filing_year),
+            )
+        else:
+            # Fallback for older/newer schema which stores filing_date but not filing_year.
+            # Use the year portion of filing_date (ISO YYYY-MM-DD) to match the requested year.
+            cursor.execute(
+                """
+                SELECT accession, cik, sec_url, filing_date
+                FROM filings_index
+                WHERE ticker = ? AND substr(filing_date,1,4) = ?
+                ORDER BY
+                    CASE WHEN filing_date IS NULL THEN 0 ELSE 1 END DESC,
+                    filing_date DESC
+                LIMIT 1
+                """,
+                (ticker.upper(), str(filing_year)),
+            )
+
         row = cursor.fetchone()
         if not row:
             return None

@@ -910,7 +910,9 @@ Examples:
     print(f"{'='*60}\n")
     
     output_file = f"output/{ticker}_YoY_Risk_Analysis_{min(years)}_{max(years)}.md"
-    generate_markdown_report(ticker, results, output_file)
+    # Use the downloader's filings DB (sec_filings.db) for provenance identifiers
+    filings_db_path = "./database/sec_filings.db"
+    generate_markdown_report(ticker, results, output_file, filings_db_path)
     
     print(f"\n{'='*60}")
     print("✅ Analysis Complete!")
