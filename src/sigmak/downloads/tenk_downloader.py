@@ -400,7 +400,7 @@ def _load_ticker_cik_mapping() -> Dict[str, str]:
         return _TICKER_CIK_CACHE
     
     try:
-        url = f"{SEC_DATA_URL}/files/company_tickers.json"
+        url = f"{SEC_BASE_URL}/files/company_tickers.json"
         response = requests.get(
             url,
             headers={"User-Agent": USER_AGENT},

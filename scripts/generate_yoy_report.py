@@ -24,10 +24,12 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, TYPE_CHECKING
+import re
 import json
 from collections import defaultdict
 from dotenv import load_dotenv
 from sigmak import filings_db
+from sigmak.integration import IntegrationPipeline
 
 if TYPE_CHECKING:
     from sigmak.integration import RiskAnalysisResult
@@ -37,7 +39,7 @@ load_dotenv()
 
 
 def load_or_analyze_filing(
-    pipeline,
+    pipeline: IntegrationPipeline,
     html_path: str,
     ticker: str,
     year: int,
@@ -58,8 +60,7 @@ def load_or_analyze_filing(
     Returns:
         RiskAnalysisResult with full risk analysis
     """
-    # Import here to avoid heavy imports at module load-time during tests
-    from sigmak.integration import IntegrationPipeline, RiskAnalysisResult
+    # Note: `IntegrationPipeline` is imported at module level; keep imports minimal here.
 
     cache_file = Path(f"output/results_{ticker}_{year}.json")
     
@@ -816,33 +817,66 @@ Examples:
     if len(years) < 2:
         parser.error("At least 2 years required for YoY comparison")
     
-    # Build file paths
+    # Build file paths (robust recursive search)
     filings = []
+    search_dirs = [Path("data/filings"), Path("data"), Path("data/samples")]
+
+    ticker_l = ticker.lower()
+    ticker_u = ticker.upper()
+
     for year in years:
-        # Try common naming patterns (search filings/ first, then data/, then samples/)
-        candidates = [
-            f"data/filings/{ticker.lower()}-{year}1031x10k.htm",
-            f"data/filings/{ticker.lower()}-{year}1231x10k.htm",
-            f"data/filings/{ticker.lower()}-{year}0930x10k.htm",
-            f"data/filings/{ticker.lower()}-{year}0630x10k.htm",
-            f"data/{ticker.lower()}-{year}1031x10k.htm",
-            f"data/{ticker.lower()}-{year}1231x10k.htm",
-            f"data/{ticker.lower()}-{year}0930x10k.htm",
-            f"data/{ticker.lower()}-{year}0630x10k.htm",
-            f"data/samples/{ticker.lower()}-{year}1031x10k.htm",
-            f"data/samples/{ticker.lower()}-{year}1231x10k.htm",
-        ]
-        
         found = False
-        for candidate in candidates:
-            if Path(candidate).exists():
-                filings.append((candidate, ticker, year))
-                found = True
+        year_str = str(year)
+
+        for base in search_dirs:
+            if not base.exists():
+                continue
+
+            # Prefer a company subfolder if present
+            candidates_dirs = []
+            company_dir = base / ticker_u
+            if company_dir.exists():
+                candidates_dirs.append(company_dir)
+            candidates_dirs.append(base)
+
+            for search_base in candidates_dirs:
+                # Look for files with both ticker and year in the filename (case-insensitive)
+                matches = list(search_base.rglob(f"*{ticker_l}*{year_str}*.htm")) + list(search_base.rglob(f"*{ticker_u}*{year_str}*.htm"))
+
+                # If no direct matches, fall back to any .htm files that include the year and ticker anywhere
+                if not matches:
+                    matches = [p for p in search_base.rglob("*.htm") if year_str in p.name and ticker_l in p.name.lower()]
+
+                # If still no matches, look for a subfolder named after the year (e.g., data/filings/IBM/2025/) and use .htm files there
+                if not matches:
+                    year_dir = search_base / year_str
+                    if year_dir.exists() and year_dir.is_dir():
+                        matches = list(year_dir.glob("*.htm"))
+
+                if matches:
+                    # Prefer files that explicitly mention 10-K ("10k" or "x10k") or an expected year-end
+                    def score_path(p: Path) -> int:
+                        name = p.name.lower()
+                        score = 0
+                        if "10k" in name or "x10k" in name:
+                            score += 10
+                        if re.search(r"(1231|1031|0930|0630)", name):
+                            score += 5
+                        if ticker_l in name:
+                            score += 2
+                        return score
+
+                    best = max(matches, key=score_path)
+                    filings.append((str(best), ticker, year))
+                    found = True
+                    break
+
+            if found:
                 break
-        
+
         if not found:
             print(f"⚠️  Could not find filing for {ticker} {year}")
-            print(f"    Tried: {', '.join(candidates)}")
+            print(f"    Searched under: {', '.join(str(p) for p in search_dirs if p.exists())}")
             sys.exit(1)
     
     print(f"\n{'='*60}")
