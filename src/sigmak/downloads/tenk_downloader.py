@@ -382,6 +382,10 @@ class FilingsDatabase:
 
 # Cached ticker→CIK mapping (load from SEC ticker list)
 _TICKER_CIK_CACHE: Optional[Dict[str, str]] = None
+_TICKER_OVERRIDES_PATHS = [
+    Path("./data/ticker_overrides.json"),
+    Path("./config/ticker_overrides.json")
+]
 
 
 def _load_ticker_cik_mapping() -> Dict[str, str]:
@@ -419,6 +423,11 @@ def _load_ticker_cik_mapping() -> Dict[str, str]:
         
         _TICKER_CIK_CACHE = mapping
         logger.info(f"Loaded {len(mapping)} ticker→CIK mappings from SEC")
+        # Apply any local overrides (take precedence)
+        overrides = _load_local_ticker_overrides()
+        if overrides:
+            mapping.update({k.upper(): str(v).zfill(10) for k, v in overrides.items()})
+            logger.info(f"Applied {len(overrides)} local ticker overrides")
         return mapping
     
     except Exception as e:
@@ -431,6 +440,46 @@ def _load_ticker_cik_mapping() -> Dict[str, str]:
             "GOOGL": "0001652044",
             "AMZN": "0001018724"
         }
+
+
+def _load_local_ticker_overrides() -> Dict[str, str]:
+    """Load local override mapping files (if present).
+
+    Returns dictionary mapping ticker -> cik (may be empty).
+    """
+    for p in _TICKER_OVERRIDES_PATHS:
+        try:
+            if p.exists():
+                with open(p, "r") as f:
+                    data = json.load(f)
+                    # Normalize keys
+                    return {k.upper(): str(v).zfill(10) for k, v in data.items()}
+        except Exception:
+            continue
+    return {}
+
+
+def _search_edgar_for_cik(ticker: str) -> Optional[str]:
+    """Attempt to find CIK by searching SEC EDGAR company page for the ticker.
+
+    This is a best-effort fallback when the official ticker list doesn't contain
+    the requested symbol (new filings, etc.). Returns 10-digit CIK string or None.
+    """
+    try:
+        url = f"{SEC_BASE_URL}/cgi-bin/browse-edgar?company={ticker}&owner=exclude&action=getcompany"
+        resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        text = resp.text
+        # Look for 'CIK=' occurrences in links
+        import re
+        m = re.search(r"CIK=(\d{1,10})", text)
+        if m:
+            cik_val = m.group(1).zfill(10)
+            logger.info(f"Found CIK via EDGAR search: {ticker} → {cik_val}")
+            return cik_val
+    except Exception as e:
+        logger.debug(f"EDGAR search for {ticker} failed: {e}")
+    return None
 
 
 def resolve_ticker_to_cik(ticker: str) -> str:
@@ -446,16 +495,30 @@ def resolve_ticker_to_cik(ticker: str) -> str:
     Raises:
         ValueError: If ticker is unknown
     """
+    # Accept direct CIK input (digits) as passthrough
+    if ticker.isdigit():
+        return ticker.zfill(10)
+
     mapping = _load_ticker_cik_mapping()
     ticker_upper = ticker.upper()
-    
-    if ticker_upper not in mapping:
-        raise ValueError(
-            f"Unknown ticker: {ticker}. "
-            f"Please verify ticker symbol on SEC EDGAR."
-        )
-    
-    return mapping[ticker_upper]
+
+    if ticker_upper in mapping:
+        return mapping[ticker_upper]
+
+    # Try EDGAR search fallback
+    cik_from_edgar = _search_edgar_for_cik(ticker_upper)
+    if cik_from_edgar:
+        # Update in-memory cache
+        global _TICKER_CIK_CACHE
+        if _TICKER_CIK_CACHE is None:
+            _TICKER_CIK_CACHE = {}
+        _TICKER_CIK_CACHE[ticker_upper] = cik_from_edgar
+        return cik_from_edgar
+
+    # Not found — instruct user to verify or add local override
+    raise ValueError(
+        f"Unknown ticker: {ticker}. Please verify ticker symbol on SEC EDGAR or add a local override in './data/ticker_overrides.json'."
+    )
 
 
 # ============================================================================
