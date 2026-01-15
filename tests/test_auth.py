@@ -26,9 +26,11 @@ def sample_html_path() -> Path:
 
 
 @pytest.fixture
-def key_manager() -> APIKeyManager:
-    """Provide fresh APIKeyManager instance for each test."""
-    return APIKeyManager()
+def key_manager(tmp_path: Path) -> APIKeyManager:
+    """Provide fresh APIKeyManager instance for each test with temp storage."""
+    # Use pytest's tmp_path to avoid side effects on api_keys.json
+    test_storage = tmp_path / "test_api_keys.json"
+    return APIKeyManager(storage_path=test_storage)
 
 
 class TestAPIKeyManager:
