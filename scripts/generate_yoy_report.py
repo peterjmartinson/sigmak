@@ -376,6 +376,16 @@ def generate_markdown_report(
         sec_url = f"https://www.sec.gov{sec_url if sec_url.startswith('/') else '/' + sec_url}"
     
     report_lines.append(f"**Filing:** 10-K (Accession: {provenance['accession']}) • CIK: {provenance['cik']} • SEC URL: {sec_url}")
+    # Warn in report if any provenance identifiers are missing
+    missing_token = filings_db.MISSING_TOKEN
+    if any(provenance.get(k) == missing_token for k in ('accession', 'cik', 'sec_url')):
+        # Console warning to alert the user during run
+        print(f"⚠️  Missing provenance identifiers for {ticker} {latest_year} — see output/missing_identifiers.csv")
+        sys.stdout.flush()
+        report_lines.append("")
+        report_lines.append("**⚠️  Missing provenance identifiers:** One or more filing identifiers (accession, CIK, or SEC URL) were not found in the local filings DB.")
+        report_lines.append("See `output/missing_identifiers.csv` for audit details and run the downloader to populate missing records.")
+        report_lines.append("")
     report_lines.append(f"**Historical Comparison:** {years[0]}–{years[-1]}")
     report_lines.append("")
     report_lines.append("---")
