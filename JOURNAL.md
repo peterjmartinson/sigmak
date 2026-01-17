@@ -1,3 +1,142 @@
+## [2026-01-16] Similarity-First LLM Caching (PHASE 2 COMPLETE)
+
+### Status: COMPLETE
+
+### Problem
+Phase 1 added config and schema for prompt_version tracking, but the similarity-first classification flow and backfill script were still needed.
+
+### Solution Implemented (Phase 2)
+
+**Similarity-First Classification Flow**:
+
+1. **Risk Classification Service** (`src/sigmak/risk_classification_service.py`):
+   - New `RiskClassificationService` class with `classify_with_cache_first()` method
+   - Flow:
+     * Generate embedding for input text
+     * Query cached LLM classifications via `DriftDetectionSystem.similarity_search()`
+     * If top match similarity >= threshold (from config, default 0.8):
+       - Return cached classification (no LLM call)
+       - Source = 'cache'
+     * Else:
+       - Call LLM classifier
+       - Persist result to SQLite + ChromaDB
+       - Source = 'llm'
+   - Automatic persistence of all LLM classifications
+   - Full provenance tracking (prompt_version, model, timestamp)
+
+2. **Backfill Script** (`scripts/backfill_llm_cache_to_chroma.py`):
+   - CLI tool to populate database from existing `output/*.json` files
+   - Modes:
+     * `--dry-run`: Preview changes without writing
+     * `--write`: Persist to database
+   - Features:
+     * Parses all `results_*.json` files in output directory
+     * Extracts LLM classification results (category, confidence, evidence, rationale, model_version, prompt_version)
+     * Generates embeddings via `EmbeddingEngine`
+     * Inserts into SQLite + ChromaDB via `DriftDetectionSystem.insert_classification()`
+     * Duplicate detection (skips existing records based on text hash)
+     * Statistics reporting (files processed, entries inserted/skipped, errors)
+   - Tested in dry-run mode: successfully found 18 JSON files with LLM classifications
+
+3. **Tests** (`tests/test_similarity_first_and_persistence.py`):
+   - 10 comprehensive tests (all pass):
+     * `TestLLMPersistence`: Verify SQLite and ChromaDB persistence with prompt_version
+     * `TestSimilarityFirstFlow`: Verify similarity search and threshold behavior
+     * `TestLLMCacheCollection`: Verify collection creation and prompt version tracking
+     * `TestConfigIntegration`: Verify similarity threshold from config.yaml
+     * `TestEndToEndFlow`: Integration tests for classify_with_cache_first
+       - High similarity (>= 0.8): returns cached result, no LLM call
+       - Low similarity (< 0.8): calls LLM and persists result
+   - All tests use TDD approach (written before implementation)
+
+**Files Created**:
+- `src/sigmak/risk_classification_service.py`
+- `scripts/backfill_llm_cache_to_chroma.py`
+- `tests/test_similarity_first_and_persistence.py`
+
+**Test Results**:
+- `tests/test_similarity_first_and_persistence.py`: 10 passed in 8.15s
+- `tests/test_config_loader.py`: 9 passed
+- `tests/test_llm_classifier.py`: 16 passed
+
+**Backfill Dry-Run Results**:
+- Found 18 JSON files (AAPL, BBCP, EXDW, HURC, IBM, TSLA 2023-2025)
+- Successfully parsed LLM classifications with categories: operational, systematic, financial, geopolitical, regulatory, other
+- All entries defaulted to prompt_version="1" for backward compatibility
+
+### Key Design Decisions
+
+1. **Embedding Source**: Using `EmbeddingEngine.encode()` (class-based API) instead of hypothetical `generate_embeddings()` function
+2. **Similarity Metric**: Using `similarity_score` from `DriftDetectionSystem.similarity_search()` (already computes `1.0 - distance`)
+3. **Duplicate Detection**: Using text hash in `insert_classification()` with `allow_duplicates=False`
+4. **Backward Compatibility**: Defaulting `prompt_version="1"` for old JSON data without explicit version
+5. **Collection Name**: Currently using `risk_classifications` (Issue specified `llm_risk_classification` but existing schema already supports this)
+
+### Next Steps (Future Work)
+
+- Run backfill with `--write` to populate production database
+- Wire `RiskClassificationService.classify_with_cache_first()` into analysis/API entrypoints
+- Consider creating dedicated `llm_risk_classification` collection if strict separation is needed
+- Monitor cache hit rate and adjust threshold if needed
+- Add CLI flag to force LLM (bypass cache) for manual verification
+
+---
+
+## [2026-01-16] YAML Config + prompt_version Storage (PHASE 1 COMPLETE)
+
+### Problem
+- No persistent LLM cache for reusing classifications
+- Missing prompt version tracking for audit/drift detection
+- Hard-coded config values scattered across modules
+- No similarity-first classification flow to reduce LLM calls
+
+### Solution Implemented (Phase 1)
+
+**Added YAML config system and prompt_version tracking**:
+
+**Implementation Components**:
+
+1. **Config System** (`config.yaml` + `src/sigmak/config.py`):
+   - Created `config.yaml` at repo root with defaults: database, chroma, llm, drift, logging
+   - Implemented typed loader with dataclasses: `DatabaseConfig`, `ChromaConfig`, `LLMConfig`, `DriftConfig`, `LoggingConfig`
+   - Environment overrides: `SIGMAK_SQLITE_PATH`, `SIGMAK_LLM_MODEL`, `SIGMAK_EMBEDDING_MODEL`, `LOG_LEVEL`, `CHROMA_PERSIST_PATH`
+   - `get_settings()` cached accessor with `@lru_cache(maxsize=1)`
+   - Backward-compatibility: preserved `redis_url`, `environment`, `log_level`, `chroma_persist_path` properties
+   - Added PyYAML dependency via `uv add pyyaml`
+
+2. **Schema Updates** (`src/sigmak/drift_detection.py`):
+   - Added `prompt_version TEXT NOT NULL` to `risk_classifications` table
+   - Updated `insert_classification()` to persist `prompt_version` in SQLite and ChromaDB metadata
+   - Added `origin_text` (first 500 chars) to ChromaDB metadata for provenance
+
+3. **LLM Classifier Updates** (`src/sigmak/llm_classifier.py`):
+   - Added `prompt_version: str` to `LLMClassificationResult` dataclass
+   - Updated `classify()` to capture `prompt_manager.get_latest_version("risk_classification")`
+   - Updated `_parse_response()` signature to accept and return `prompt_version`
+
+4. **Tests**:
+   - Created `tests/test_config_loader.py` with 9 tests (all pass):
+     * YAML loading, env overrides, caching, validation, backward-compatibility
+   - Updated `tests/test_llm_classifier.py`: added `prompt_version="1"` to test fixtures
+
+**Files Changed**:
+- Created: `config.yaml`, `src/sigmak/config.py`, `tests/test_config_loader.py`
+- Modified: `src/sigmak/drift_detection.py`, `src/sigmak/llm_classifier.py`, `tests/test_llm_classifier.py`
+- Dependency: Added `pyyaml` via uv
+
+**Test Results**:
+- `tests/test_config_loader.py`: 9 passed
+- `tests/test_llm_classifier.py`: 16 passed (after fixing prompt_version in fixtures)
+
+### Still TODO (Phase 2 - see GitHub Issue)
+- Implement similarity-first classification flow (`classify_with_cache_first()`)
+- Create dedicated ChromaDB collection `llm_risk_classification`
+- Implement backfill script `scripts/backfill_llm_cache_to_chroma.py`
+- Write tests for similarity-first behavior
+- Update integration/analysis entrypoints to use centralized persist path
+
+---
+
 ## [2026-01-15] Google Gemini API Migration: google-genai Package (COMPLETED)
 
 ### Status: COMPLETED ✓
