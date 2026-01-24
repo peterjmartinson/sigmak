@@ -1,0 +1,165 @@
+/*
+ * PDF Report Styling for SEC Risk Analysis Documents
+ * 
+ * This is a minimal, readable starter stylesheet. Customize as needed:
+ * - Typography: Change fonts, sizes, line heights
+ * - Colors: Update heading/body colors, code block backgrounds
+ * - Layout: Adjust margins, page breaks, spacing
+ * - Tables: Style data tables with borders, alternating rows
+ * 
+ * WeasyPrint CSS Reference: https://doc.courtbouillon.org/weasyprint/stable/
+ */
+
+/* Page setup */
+@page {
+    size: letter;  /* US Letter: 8.5" × 11" */
+    margin: 1in;   /* All sides: 1 inch */
+}
+
+/* Body text */
+body {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #222;
+}
+
+/* Headings */
+h1 {
+    font-size: 24pt;
+    color: #0b3d91;  /* NASA blue - professional, authoritative */
+    margin-top: 0.5in;
+    margin-bottom: 0.25in;
+    border-bottom: 2px solid #0b3d91;
+    padding-bottom: 0.1in;
+}
+
+h2 {
+    font-size: 18pt;
+    color: #0b3d91;
+    margin-top: 0.4in;
+    margin-bottom: 0.2in;
+}
+
+h3 {
+    font-size: 14pt;
+    color: #0b3d91;
+    margin-top: 0.3in;
+    margin-bottom: 0.15in;
+}
+
+h4, h5, h6 {
+    font-size: 12pt;
+    color: #333;
+    margin-top: 0.2in;
+    margin-bottom: 0.1in;
+}
+
+/* Paragraphs */
+p {
+    margin-bottom: 0.15in;
+    text-align: justify;
+}
+
+/* Lists */
+ul, ol {
+    margin-left: 0.25in;
+    margin-bottom: 0.15in;
+}
+
+li {
+    margin-bottom: 0.05in;
+}
+
+/* Code blocks and inline code */
+pre {
+    background-color: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 12pt;
+    overflow-x: auto;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 9pt;
+    line-height: 1.4;
+    margin-bottom: 0.15in;
+}
+
+code {
+    background-color: #f6f8fa;
+    padding: 2pt 4pt;
+    border-radius: 3px;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 9pt;
+}
+
+pre code {
+    background-color: transparent;
+    padding: 0;
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0.2in;
+    font-size: 10pt;
+}
+
+th {
+    background-color: #0b3d91;
+    color: white;
+    font-weight: bold;
+    text-align: left;
+    padding: 8pt;
+    border: 1px solid #ddd;
+}
+
+td {
+    padding: 6pt 8pt;
+    border: 1px solid #ddd;
+}
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+/* Blockquotes */
+blockquote {
+    margin-left: 0.25in;
+    padding-left: 0.2in;
+    border-left: 3px solid #0b3d91;
+    color: #555;
+    font-style: italic;
+}
+
+/* Images */
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0.15in auto;
+}
+
+/* Horizontal rules */
+hr {
+    border: none;
+    border-top: 1px solid #ccc;
+    margin: 0.3in 0;
+}
+
+/* Links (for HTML viewing; PDFs will show as normal text) */
+a {
+    color: #0b3d91;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Page breaks - uncomment to force breaks before h1 headings */
+/*
+h1 {
+    page-break-before: always;
+}
+*/

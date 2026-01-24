@@ -1,3 +1,40 @@
+## [2026-01-24] Markdown → PDF Converter (WeasyPrint) — Starter Integration
+
+### Status: COMPLETE ✓
+
+### Summary
+Added a small, well-organized Markdown → PDF conversion utility to produce distribution-ready PDFs from the project's generated reports. The implementation is intentionally minimal and explicit so future formatting changes are straightforward and easy to reason about.
+
+### What I added
+- `scripts/md_to_pdf.py` — readable, commented Python converter (Markdown → HTML → PDF) using `markdown`, `jinja2`, and `WeasyPrint`.
+- `styles/report.css` — minimal, professional stylesheet for print (serif typography, styled tables/code, 1" margins).
+- `styles/README.md` — quick instructions for customizing styles and using alternate CSS.
+- `pyproject.toml` optional deps: added `[project.optional-dependencies].pdf` with `weasyprint`, `markdown`, `jinja2` for reproducible installs.
+
+### Why
+- Provides a low-friction path to get polished PDFs from `scripts/generate_yoy_report.py` output without heavy LaTeX installs.
+- Keeps styling and assets grouped under `styles/` and the conversion logic under `scripts/` for clear separation of concerns.
+
+### How to use
+1. Install system deps (Debian/Ubuntu): `sudo apt install build-essential libffi-dev libcairo2 libpango-1.0-0 libgdk-pixbuf2.0-0` and then `pip install weasyprint markdown jinja2` (or `pip install .[pdf]` if you use hatch/uv). 
+2. Run:
+```
+python scripts/md_to_pdf.py output/TSLA_YoY_Risk_Analysis_2023_2025.md
+```
+This writes `output/TSLA_YoY_Risk_Analysis_2023_2025.pdf` (same folder by default).
+
+### Notes
+- The converter is intentionally simple to avoid hidden complexity; edit `styles/report.css` to refine PDF appearance.
+- For advanced print features (headers/footers, page numbers, hyphenation), consider migrating to Pandoc+LaTeX later.
+
+### Files changed
+- Added: `scripts/md_to_pdf.py`, `styles/report.css`, `styles/README.md`
+- Updated: `pyproject.toml` (optional dependencies)
+
+### Validation
+- Ran a local conversion on `output/AAPL_YoY_Risk_Analysis_2023_2025.md` and produced `output/AAPL_YoY_Risk_Analysis_2023_2025.pdf` (45KB).
+
+
 ## [2026-01-21] Issue #26: Unified Vector Store for Risk Classification (PHASE 1 COMPLETE)
 
 ### Status: PHASE 1 COMPLETE ✓
