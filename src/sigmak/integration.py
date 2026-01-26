@@ -139,7 +139,6 @@ class IntegrationPipeline:
     def __init__(
         self,
         persist_path: str = "./database",
-        use_llm: bool = False,
         db_only_classification: bool = False,
         db_only_similarity_threshold: float = 0.8
     ) -> None:
@@ -151,7 +150,6 @@ class IntegrationPipeline:
             use_llm: Enable LLM-based risk classification (default: False)
         """
         self.persist_path = persist_path
-        self.use_llm = use_llm
         # When True, classifier will only consult the vector DB and never call the LLM
         self.db_only_classification = db_only_classification
         # Similarity threshold (0-1) for accepting a DB match in DB-only mode
@@ -167,7 +165,7 @@ class IntegrationPipeline:
         self._llm_classifier: Optional[RiskClassifierWithLLM] = None
         self._gemini_classifier: Optional[GeminiClassifier] = None
         
-        logger.info(f"Initialized IntegrationPipeline with DB at {persist_path}, use_llm={use_llm}")
+        logger.info(f"Initialized IntegrationPipeline with DB at {persist_path}")
     
     @property
     def gemini_classifier(self) -> GeminiClassifier:
@@ -195,12 +193,13 @@ class IntegrationPipeline:
     def llm_classifier(self) -> RiskClassifierWithLLM:
         """Lazy-load LLM classifier only when needed."""
         if self._llm_classifier is None:
-            logger.info("Initializing LLM classifier...")
-            llm = GeminiClassifier()
+            logger.info("Initializing risk classifier (vector-first). LLM will be created lazily if needed.")
             storage = LLMStorage()
+            # Do not create GeminiClassifier here; let RiskClassifierWithLLM
+            # lazily instantiate it only when an LLM call is required.
             self._llm_classifier = RiskClassifierWithLLM(
                 indexing_pipeline=self.indexing_pipeline,
-                llm_classifier=llm,
+                llm_classifier=None,
                 llm_storage=storage
             )
         return self._llm_classifier
@@ -331,28 +330,48 @@ class IntegrationPipeline:
                     risk_dict["category_confidence"] = db_classification["confidence"]
                     risk_dict["classification_method"] = db_classification["method"]
 
-                elif self.use_llm:
-                    # LLM mode: call LLM and persist result as before
-                    if not chunk.get("text") or len(chunk.get("text", "").strip()) < 50:
-                        logger.warning("Skipping LLM classification: chunk text too short or empty")
-                        llm_classification = {
+                else:
+                    # Default classification: vector-store-first, then LLM fallback
+                    if not chunk.get("text") or len(chunk.get("text", "").strip()) < 20:
+                        logger.warning("Skipping classification: chunk text too short or empty")
+                        klass = {
                             'category': 'UNCATEGORIZED',
                             'confidence': 0.0,
                             'method': 'skipped',
                             'llm_result': None
                         }
                     else:
-                        logger.info(f"Classifying risk with LLM...")
-                        llm_classification = self._classify_risk_with_llm(
-                            chunk=chunk,
-                            vector_metadata=chunk.get("metadata")
-                        )
-                    risk_dict["category"] = llm_classification["category"]
-                    risk_dict["category_confidence"] = llm_classification["confidence"]
-                    risk_dict["classification_method"] = llm_classification["method"]
-                    if llm_classification["llm_result"]:
-                        risk_dict["llm_evidence"] = llm_classification["llm_result"]["evidence"]
-                        risk_dict["llm_rationale"] = llm_classification["llm_result"]["rationale"]
+                        logger.info("Classifying risk using vector-first then LLM fallback")
+                        try:
+                            rc = self.llm_classifier.classify(text=chunk["text"], use_cache=True)
+                            category = rc.category.value if hasattr(rc.category, 'value') else str(rc.category)
+                            klass = {
+                                'category': category,
+                                'confidence': rc.confidence,
+                                'method': rc.method,
+                                'llm_result': None
+                            }
+                            if rc.llm_result:
+                                klass['llm_result'] = {
+                                    'evidence': rc.llm_result.evidence,
+                                    'rationale': rc.llm_result.rationale,
+                                    'model_version': rc.llm_result.model_version
+                                }
+                        except Exception as e:
+                            logger.warning(f"Classification failed: {e}")
+                            klass = {
+                                'category': 'UNCATEGORIZED',
+                                'confidence': 0.0,
+                                'method': 'error',
+                                'llm_result': None
+                            }
+
+                    risk_dict["category"] = klass["category"]
+                    risk_dict["category_confidence"] = klass["confidence"]
+                    risk_dict["classification_method"] = klass["method"]
+                    if klass.get("llm_result"):
+                        risk_dict["llm_evidence"] = klass["llm_result"]["evidence"]
+                        risk_dict["llm_rationale"] = klass["llm_result"]["rationale"]
                 
                 risks.append(risk_dict)
                 
