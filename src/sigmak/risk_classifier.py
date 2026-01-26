@@ -114,7 +114,10 @@ class RiskClassifierWithLLM:
             low_threshold: Similarity threshold for LLM fallback (default: 0.64)
         """
         self.pipeline = indexing_pipeline or IndexingPipeline()
-        self.llm_classifier = llm_classifier or GeminiClassifier()
+        # Do NOT instantiate GeminiClassifier eagerly to avoid requiring
+        # API credentials at classifier construction time. Instantiate
+        # lazily when an LLM call is actually required.
+        self.llm_classifier = llm_classifier
         self.llm_storage = llm_storage or LLMStorage()
         self.embedding_engine = embedding_engine or EmbeddingEngine()
         
@@ -259,6 +262,25 @@ class RiskClassifierWithLLM:
         Returns:
             RiskClassificationResult
         """
+        # Ensure an LLM client exists (lazy instantiation). If we cannot
+        # create the Gemini client (e.g., missing API key), gracefully
+        # fall back to UNCATEGORIZED without raising to the caller.
+        if self.llm_classifier is None:
+            try:
+                self.llm_classifier = GeminiClassifier()
+            except Exception as e:
+                logger.warning(f"LLM unavailable, skipping LLM classification: {e}")
+                return RiskClassificationResult(
+                    text=text,
+                    category=validate_category("other"),
+                    confidence=0.0,
+                    method="llm_unavailable",
+                    similarity_score=vector_similarity,
+                    llm_result=None,
+                    cached=False,
+                    timestamp=timestamp
+                )
+
         # Call LLM
         llm_result = self.llm_classifier.classify(text)
         

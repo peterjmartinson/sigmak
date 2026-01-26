@@ -861,11 +861,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python generate_yoy_report.py                          # Default: HURC 2023-2025
-  python generate_yoy_report.py TSLA 2022 2023 2024     # Custom ticker and years
-  python generate_yoy_report.py --use-llm               # Enable LLM classification
-  python generate_yoy_report.py HURC 2023 2024 2025 --use-llm
-        """
+    python generate_yoy_report.py                          # Default: HURC 2023-2025
+    python generate_yoy_report.py TSLA 2022 2023 2024     # Custom ticker and years
+    python generate_yoy_report.py HURC 2023 2024 2025
+                """
     )
     parser.add_argument(
         'ticker',
@@ -879,11 +878,7 @@ Examples:
         type=int,
         help='Filing years (default: 2023 2024 2025)'
     )
-    parser.add_argument(
-        '--use-llm',
-        action='store_true',
-        help='Enable LLM-based risk classification (increases latency and cost)'
-    )
+    # Default behavior: vector-store-first, then LLM fallback. Use DB-only flag to prevent LLM calls.
     parser.add_argument(
         '--db-only-classification',
         action='store_true',
@@ -901,7 +896,6 @@ Examples:
     # Set defaults
     ticker = args.ticker.upper()
     years = args.years if args.years else [2023, 2024, 2025]
-    use_llm = args.use_llm
     db_only_classification = args.db_only_classification
     db_only_similarity_threshold = args.db_only_similarity_threshold
     
@@ -976,14 +970,12 @@ Examples:
     print(f"{'='*60}")
     print(f"Company: {ticker}")
     print(f"Years: {', '.join(map(str, years))}")
-    print(f"LLM Classification: {'Enabled' if use_llm else 'Disabled'}")
-    print(f"DB-only Classification: {'Enabled' if db_only_classification else 'Disabled'}")
+    print(f"Classification mode: {'DB-only (no LLM)' if db_only_classification else 'vector-first then LLM fallback'}")
     print(f"{'='*60}\n")
     
     # Initialize pipeline
     pipeline = IntegrationPipeline(
         persist_path="./chroma_db",
-        use_llm=use_llm,
         db_only_classification=db_only_classification,
         db_only_similarity_threshold=db_only_similarity_threshold
     )
@@ -996,8 +988,7 @@ Examples:
             html_path=html_path,
             ticker=ticker_sym,
             year=year,
-            retrieve_top_k=10,
-            use_llm=use_llm
+            retrieve_top_k=10
         )
         results.append(result)
     

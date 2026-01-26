@@ -20,3 +20,27 @@ Acceptance Criteria
 Stand-alone workflow: Run script after discovery + download, get a report with peer benchmarking
 Handles subset analysis when some peers have no filing
 Clean, actionable, easy-to-copy Markdown output suitable for investors or technical review
+
+Specific items for comparison:
+
+Textual Novelty (Year-over-Year):
+
+Compare the current 10-K risk section to the previous year’s 10-K for the same company.
+
+Metric: Percentage of "New" vs. "Repeated" sentences.
+
+Peer Similarity Score:
+
+Calculate the Jaccard Similarity or Cosine Similarity between the target's risk section and the industry peer average.
+
+Insight: A low similarity score indicates "Company-Specific" risks that aren't industry-standard.
+
+Risk Density & Volume:
+
+Metric: Word count and paragraph count relative to the peer median.
+
+Linguistic Tone (Sentiment):
+
+Count occurrences of financial "Risk" keywords (e.g., litigation, volatility, uncertainty, adverse).
+
+Metric: Keywords per 1,000 words compared to peers.

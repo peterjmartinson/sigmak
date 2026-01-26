@@ -28,6 +28,11 @@ from google.genai import types
 
 from sigmak.prompt_manager import PromptManager
 from sigmak.risk_taxonomy import RiskCategory, validate_category
+from dotenv import load_dotenv
+
+# Load environment variables so API keys from .env are available when the
+# Gemini client is instantiated.
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
