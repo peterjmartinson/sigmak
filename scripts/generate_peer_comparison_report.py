@@ -27,6 +27,7 @@ from sigmak.integration import IntegrationPipeline, IntegrationError, RiskAnalys
 from sigmak.text_utils import clean_text
 from sigmak.downloads.tenk_downloader import TenKDownloader, resolve_ticker_to_cik, fetch_company_submissions
 from sigmak.peer_discovery import PeerDiscoveryService
+from sigmak import peer_selection as peer_selection
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,14 @@ def compute_category_distribution(result: RiskAnalysisResult) -> Dict[str, float
     return {k: v / total for k, v in counts.items()}
 
 
-def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisResult], outpath: Path) -> None:
+def generate_markdown_report(
+    target: str,
+    year: int,
+    results: List[RiskAnalysisResult],
+    outpath: Path,
+    enable_semantic: bool = False,
+    similarity_backend: str = "tfidf",
+) -> None:
     target_result = next(r for r in results if r.ticker.upper() == target.upper())
     peer_results = [r for r in results if r.ticker.upper() != target.upper()]
 
@@ -200,6 +208,7 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     unique_previews = []
     shared_entries = []
 
+    # Compute shared entries using existing token-Jaccard logic (backward compatible)
     for t in target_risks:
         t_tokens = tokenize(t)
         best_score = 0.0
@@ -226,7 +235,48 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
                 "score": best_score,
             })
         else:
+            # collect as candidate unique preview; may be refined by semantic method below
             unique_previews.append((t or "").strip()[:200])
+
+    # If semantic backend requested, refine unique detection via semantic comparisons
+    if enable_semantic:
+        try:
+            # Build peer-paragraphs dict
+            peer_paragraphs_by_ticker = {}
+            for pr in peer_results:
+                peer_paragraphs_by_ticker[pr.ticker.upper()] = [clean_text(r.get("text", "")) for r in pr.risks]
+
+            # Pass previous-year paragraphs into identify_unique_alpha_risks
+            prev_risks = []
+            try:
+                if prior_path.exists():
+                    import json
+
+                    prev = json.loads(prior_path.read_text())
+                    prev_risks = [clean_text(r.get("text", "")) for r in prev.get("risks", [])]
+            except Exception:
+                prev_risks = []
+
+            unique_results, substantive_change = peer_selection.identify_unique_alpha_risks(
+                [clean_text(t) for t in target_risks],
+                peer_paragraphs_by_ticker,
+                similarity_backend=similarity_backend,
+                unique_threshold=0.3,
+                prev_paragraphs=prev_risks,
+            )
+            # unique_previews: semantically-identified unique paragraphs
+            unique_previews = [u["paragraph"].strip()[:200] for u in unique_results if u.get("is_unique")]
+            # add substantive change info to specific comparisons section
+            try:
+                data_specific = data.get("specific_comparisons", {})
+                data_specific["substantive_change_percent"] = float(substantive_change)
+                data["specific_comparisons"] = data_specific
+            except Exception:
+                pass
+            # Replace unique_previews with semantically-identified unique paragraphs
+            unique_previews = [u["paragraph"].strip()[:200] for u in unique_results if u.get("is_unique")]
+        except Exception as e:
+            logger.warning("Semantic unique-risk identification failed: %s — falling back to token-based unique previews", e)
 
     lines.append("## Unique Risks (target, preview)")
     lines.append("")
@@ -271,14 +321,30 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     if prior_path.exists():
         try:
             import json
+
             prev = json.loads(prior_path.read_text())
-            prev_text = "\n".join([r.get("text", "") for r in prev.get("risks", [])])
-            cur_sents = set(sentences(target_text))
-            prev_sents = set(sentences(prev_text))
+            prev_paragraphs = [r.get("text", "") for r in prev.get("risks", [])]
+            prev_text = "\n".join(prev_paragraphs)
+
+            # Use compute_semantic_similarity (backend-configurable) to avoid
+            # flagging reordered or lightly rephrased sentences as novel.
+            cur_sents = [s for s in sentences(target_text)]
+            prev_sents = [s for s in sentences(prev_text)]
             if cur_sents:
-                new = cur_sents - prev_sents
-                pct_new = (len(new) / len(cur_sents)) * 100.0
-                novelty_line = f"Textual novelty (YoY): {pct_new:.1f}% new sentences ({len(new)} of {len(cur_sents)})"
+                repeated = 0
+                for s in cur_sents:
+                    best = 0.0
+                    for psent in prev_sents:
+                        try:
+                            sim = peer_selection.compute_semantic_similarity(s, psent, backend=similarity_backend)
+                        except Exception:
+                            sim = 0.0
+                        if sim > best:
+                            best = sim
+                    if best > 0.85:
+                        repeated += 1
+                pct_new = ((len(cur_sents) - repeated) / len(cur_sents)) * 100.0
+                novelty_line = f"Textual novelty (YoY, semantic-aware): {pct_new:.1f}% new sentences ({len(cur_sents)-repeated} of {len(cur_sents)})"
             else:
                 novelty_line = "Textual novelty: no sentences detected in current filing"
         except Exception:
@@ -520,6 +586,8 @@ def main() -> None:
     parser.add_argument("--output", type=str, default=None, help="Output markdown path (default: output/{TICKER}_Peer_Comparison_{YEAR}.md)")
     parser.add_argument("--db-only-classification", action="store_true", help="Use DB-only classification (no LLM calls)")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    parser.add_argument("--enable-semantic", action="store_true", help="Enable sentence-transformers semantic backend (may be heavy). Default is TF-IDF.")
+    parser.add_argument("--enhanced-peer-selection", action="store_true", help="Validate candidate peers by market-cap/SIC using yfinance before selecting peers")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
@@ -543,6 +611,7 @@ def main() -> None:
 
     target = args.ticker.upper()
     year = args.year
+    similarity_backend = "semantic" if args.enable_semantic else "tfidf"
 
     # Analyze target first — if target filing is unavailable, abort.
     try:
@@ -573,6 +642,18 @@ def main() -> None:
         # request a larger pool to allow replacements when some peers lack filings
         candidates = svc.find_peers_for_ticker(target, top_n=max(desired * 3, desired + 6))
 
+    # Optionally validate and filter candidate peers by market cap / SIC
+    if args.enhanced_peer_selection:
+        try:
+            validated = peer_selection.validate_peer_group(target, candidates)
+            if validated:
+                candidates = validated
+                logger.info("Validated peers by market-cap/SIC: %s", candidates)
+            else:
+                logger.info("Peer validation returned empty — using original candidates")
+        except Exception as e:
+            logger.warning("Peer validation failed: %s — continuing with unvalidated candidates", e)
+
     for cand in candidates:
         if len(collected) >= desired:
             break
@@ -599,7 +680,14 @@ def main() -> None:
     results = [target_result] + collected
 
     outpath = Path(args.output) if args.output else Path("output") / f"{target}_Peer_Comparison_{year}.md"
-    generate_markdown_report(target, year, results, outpath)
+    generate_markdown_report(
+        target,
+        year,
+        results,
+        outpath,
+        enable_semantic=args.enable_semantic,
+        similarity_backend=similarity_backend,
+    )
     print(f"Wrote report: {outpath}")
 
 

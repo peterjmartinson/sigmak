@@ -76,6 +76,11 @@ def main():
                 risk['category'] = llm_result.category.value
                 risk['category_confidence'] = llm_result.confidence
                 risk['classification_method'] = source
+                # Persist LLM rationale returned by the classifier
+                try:
+                    risk['llm_rationale'] = llm_result.rationale
+                except Exception:
+                    risk['llm_rationale'] = ''
                 print(f"Risk #{i}: classified as {risk['category']} (source={source})")
             else:
                 # No API key: perform cache-only lookup against DriftDetectionSystem
@@ -87,11 +92,14 @@ def main():
                         risk['category'] = top.get('category', 'UNCATEGORIZED')
                         risk['category_confidence'] = float(top.get('confidence', 0.0))
                         risk['classification_method'] = 'vector_db'
+                        # If the cached vector DB record included a rationale, preserve it
+                        risk['llm_rationale'] = top.get('rationale', '')
                         print(f"Risk #{i}: classified from vector DB as {risk['category']}")
                     else:
                         risk['category'] = 'UNCATEGORIZED'
                         risk['category_confidence'] = 0.0
                         risk['classification_method'] = 'db_only_no_match'
+                        risk['llm_rationale'] = ''
                         print(f"Risk #{i}: no cached classification found; marked UNCATEGORIZED")
                 except Exception as e:
                     print(f"Risk #{i}: cache-only classification failed: {e}")
