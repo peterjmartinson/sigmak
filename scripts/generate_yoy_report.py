@@ -50,7 +50,7 @@ def load_or_analyze_filing(
     use_llm: bool = False
 ) -> "RiskAnalysisResult":
     """
-    Load cached results or analyze filing fresh.
+    Load cached results or perform fresh analysis.
     
     Args:
         pipeline: Integration pipeline instance
@@ -72,28 +72,116 @@ def load_or_analyze_filing(
         print(f"📂 Loading cached results for {ticker} {year}...")
         with open(cache_file, 'r') as f:
             data = json.load(f)
-            # If cached result was generated without reranking enabled,
-            # re-run analysis to ensure reranking is applied (default: rerank=True).
-            if not data.get('metadata', {}).get('rerank', True):
-                print(f"♻️ Cached results for {ticker} {year} were generated with rerank=False; re-running with rerank=True...")
-                result = pipeline.analyze_filing(
-                    html_path=html_path,
-                    ticker=ticker,
-                    filing_year=year,
-                    retrieve_top_k=retrieve_top_k,
-                    rerank=True
-                )
-                # Update cache
-                with open(cache_file, 'w') as wf:
-                    wf.write(result.to_json())
-                return result
 
-            return RiskAnalysisResult(
-                ticker=data['ticker'],
-                filing_year=data['filing_year'],
-                risks=data['risks'],
-                metadata=data['metadata']
+            not_reranked = not data.get('metadata', {}).get('rerank', True)
+            # Determine whether any risk in the cached result already has a category
+            risks_list = data.get('risks', []) if isinstance(data, dict) else []
+            is_categorized = any(r.get('category') for r in risks_list)
+
+            print(f"needs reranking? {not_reranked}, categorized? {is_categorized}")
+
+            # If cached result contains a well-defined per-risk categorization,
+            # stop here and return the cached result (unless reranking was disabled)
+            if is_categorized:
+                if not_reranked:
+                    print(f"♻️ Cached results for {ticker} {year} were generated with rerank=False; re-running with rerank=True...")
+                    result = pipeline.analyze_filing(
+                        html_path=html_path,
+                        ticker=ticker,
+                        filing_year=year,
+                        retrieve_top_k=retrieve_top_k,
+                        rerank=True
+                    )
+                    # Update cache
+                    with open(cache_file, 'w') as wf:
+                        wf.write(result.to_json())
+                    return result
+
+                return RiskAnalysisResult(
+                    ticker=data['ticker'],
+                    filing_year=data['filing_year'],
+                    risks=data['risks'],
+                    metadata=data['metadata']
+                )
+
+            # If we reached here, cached file exists but per-risk categories
+            # are missing or empty. Rehydrate RiskAnalysisResult from cache,
+            # run classification enrichment (vector DB -> optional LLM),
+            # persist updated cache, and return the enriched result.
+            print(f"♻️ Cached results for {ticker} {year} missing per-risk categories; enriching and persisting...")
+            result = RiskAnalysisResult(
+                ticker=data.get('ticker', ticker),
+                filing_year=data.get('filing_year', year),
+                risks=data.get('risks', []),
+                metadata=data.get('metadata', {})
             )
+
+            # Initialize classification service if available
+            use_full_service = False
+            classification_service = None
+            if os.getenv('GOOGLE_API_KEY'):
+                try:
+                    classification_service = RiskClassificationService(drift_system=pipeline.drift_system)
+                    use_full_service = True
+                except Exception:
+                    use_full_service = False
+
+            # Enrich per-risk categories in-place
+            for r in result.risks:
+                try:
+                    if r.get('metadata', {}).get('category'):
+                        r['category'] = r['metadata']['category']
+                        r['category_confidence'] = r['metadata'].get('confidence', 0.0)
+                        r['classification_method'] = r['metadata'].get('classification_source', 'vector')
+                        continue
+
+                    if use_full_service and classification_service:
+                        try:
+                            llm_result, source = classification_service.classify_with_cache_first(r['text'])
+                            r['category'] = llm_result.category.value
+                            r['category_confidence'] = llm_result.confidence
+                            r['classification_method'] = source
+                            # Persist rationale/evidence provided by the LLM
+                            try:
+                                r['llm_rationale'] = llm_result.rationale
+                            except Exception:
+                                r['llm_rationale'] = ''
+                        except Exception:
+                            r['category'] = 'UNCATEGORIZED'
+                            r['category_confidence'] = 0.0
+                            r['classification_method'] = 'error'
+                    else:
+                        try:
+                            embedding = pipeline.indexing_pipeline.embeddings.encode([r['text']])[0].tolist()
+                            cache_results = pipeline.drift_system.similarity_search(query_embedding=embedding, n_results=1)
+                            if cache_results and cache_results[0].get('similarity_score', 0.0) >= 0.8:
+                                top = cache_results[0]
+                                r['category'] = top.get('category', 'UNCATEGORIZED')
+                                r['category_confidence'] = float(top.get('confidence', 0.0))
+                                r['classification_method'] = 'vector_db'
+                                # Carry forward any stored rationale from the cached classification
+                                r['llm_rationale'] = top.get('rationale', '')
+                            else:
+                                r['category'] = 'UNCATEGORIZED'
+                                r['category_confidence'] = 0.0
+                                r['classification_method'] = 'db_only_no_match'
+                                r['llm_rationale'] = ''
+                        except Exception:
+                            r['category'] = 'UNCATEGORIZED'
+                            r['category_confidence'] = 0.0
+                            r['classification_method'] = 'error'
+                except Exception:
+                    continue
+
+            # Persist enriched cache back to disk
+            try:
+                with open(cache_file, 'w', encoding='utf-8') as wf:
+                    wf.write(result.to_json())
+                print(f"   ✅ Updated cached results with classifications: {cache_file}")
+            except Exception as e:
+                print(f"   ⚠️ Failed to write enriched cache for {ticker} {year}: {e}")
+
+            return result
     
     # Analyze fresh
     print(f"🔍 Analyzing {ticker} {year} from {html_path}...")
@@ -118,6 +206,7 @@ def load_or_analyze_filing(
             classification_service = RiskClassificationService(drift_system=pipeline.drift_system)
             use_full_service = True
         except Exception:
+            print("   -> No GOOGLE_API_KEY found in .env.  Proceeding without full classification service.")
             use_full_service = False
 
     for r in result.risks:
@@ -861,7 +950,6 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python generate_yoy_report.py                          # Default: HURC 2023-2025
     python generate_yoy_report.py TSLA 2022 2023 2024     # Custom ticker and years
     python generate_yoy_report.py HURC 2023 2024 2025
                 """
@@ -869,14 +957,18 @@ Examples:
     parser.add_argument(
         'ticker',
         nargs='?',
-        default='HURC',
-        help='Stock ticker symbol (default: HURC)'
+        help='Stock ticker symbol'
     )
+
+    now = datetime.now()
+    this_year = now.year
+    default_years = list(range(this_year-2, this_year+1))
+
     parser.add_argument(
         'years',
         nargs='*',
         type=int,
-        help='Filing years (default: 2023 2024 2025)'
+        help=f'Filing years (default: {default_years})'
     )
     # Default behavior: vector-store-first, then LLM fallback. Use DB-only flag to prevent LLM calls.
     parser.add_argument(
@@ -895,7 +987,8 @@ Examples:
     
     # Set defaults
     ticker = args.ticker.upper()
-    years = args.years if args.years else [2023, 2024, 2025]
+
+    years = args.years if args.years else default_years
     db_only_classification = args.db_only_classification
     db_only_similarity_threshold = args.db_only_similarity_threshold
     
