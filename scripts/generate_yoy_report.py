@@ -833,11 +833,29 @@ def generate_markdown_report(
         
         report_lines.append(f"### {i}. {risk_label} — {category}{status_badge}")
         report_lines.append("")
-        report_lines.append(f"_Severity: {severity_val:.2f} | Novelty: {novelty_val:.2f}_")
+        report_lines.append(f"_Severity: {severity_val:.2f} | Novelty: {novelty_val:.2f} | Confidence: {confidence}_")
         report_lines.append("")
         report_lines.append(f"> {text_preview}...")
         report_lines.append("")
-        report_lines.append(f"**Impact:** {impact_label} | **Confidence:** {confidence} | **Evidence:** [{evidence_short}]({evidence_url}) | **Monitoring:** {monitoring}")
+        
+        # Add LLM classification reasoning if available
+        llm_evidence = risk.get('llm_evidence', '')
+        llm_rationale = risk.get('llm_rationale', '')
+        
+        if llm_rationale:
+            report_lines.append(f"**Classification Rationale:** {llm_rationale}")
+            report_lines.append("")
+        
+        if llm_evidence:
+            # Clean and truncate evidence if too long
+            evidence_text = llm_evidence.replace('\n', ' ').strip()
+            if len(evidence_text) > 400:
+                evidence_text = evidence_text[:397] + "..."
+            report_lines.append(f"**Key Risk Factors:** {evidence_text}")
+            report_lines.append("")
+        
+        # Add filing citation
+        report_lines.append(f"**Filing Reference:** [View in 10-K]({evidence_url})")
         report_lines.append("")
         report_lines.append("---")
         report_lines.append("")

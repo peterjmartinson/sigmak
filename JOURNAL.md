@@ -1,3 +1,61 @@
+## [2026-02-04] LLM Reasoning in Investment Reports
+
+### Status: COMPLETE ✓
+
+### Summary
+Enhanced YoY risk analysis reports to showcase valuable LLM classification reasoning (evidence and rationale) instead of generic impact/monitoring statements. Reports now explain WHY each risk was classified in its category and WHAT specific factors drive the classification, providing transparency and actionable intelligence for investment decisions.
+
+### What I changed
+- **Updated**: `scripts/generate_yoy_report.py`
+  - Replaced generic "Impact" and "Monitoring" fields with LLM-powered insights
+  - Added **Classification Rationale**: WHY the LLM classified the risk in this category
+  - Added **Key Risk Factors**: Extracted evidence showing WHAT specific factors matter
+  - Retained **Filing Reference** link for source verification
+  - Graceful handling when LLM fields not present (vector-only classifications)
+
+### Before vs After
+
+**Before (Generic):**
+```
+**Impact:** revenue impact (Med-High) | **Confidence:** Medium 
+**Evidence:** [para 2](link) | **Monitoring:** quarterly filings
+```
+
+**After (LLM-Powered):**
+```
+**Classification Rationale:** The risk explicitly highlights 'regional 
+or global conflicts, or terrorism' and 'Changes in U.S. trade policy...' 
+These are direct examples of geopolitical instability...
+
+**Key Risk Factors:** As global economic conditions experience stress and 
+negative volatility... Changes in U.S. trade policy, including tariffs...
+
+**Filing Reference:** [View in 10-K](link)
+```
+
+### Client Value
+- **Transparency**: Understand WHY each risk classification was made
+- **Evidence**: See WHAT specific language triggered the classification
+- **Verification**: Access source material in 10-K for deep-dive
+- **Trust**: AI-powered insights with transparent reasoning process
+- **Actionability**: Specific risk factors to monitor, not generic suggestions
+
+### Technical Details
+- Pulls from `llm_evidence` and `llm_rationale` fields in cached results
+- Evidence text cleaned and truncated to 400 chars for readability
+- Works with both LLM and vector-based classifications
+- Removed 80+ lines of generic impact/monitoring logic
+- Simplified presentation focusing on what matters most
+
+### Validation
+✅ 299/300 tests passing  
+✅ Report generation verified (HURC 2023-2025)  
+✅ LLM reasoning displayed for all risks  
+✅ Filing citations preserved  
+✅ Graceful degradation when fields missing  
+
+---
+
 ## [2026-02-04] Enhanced Vector Classification Rationales
 
 ### Status: COMPLETE ✓
