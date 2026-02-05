@@ -10,7 +10,7 @@ chroma:
   llm_cache_similarity_threshold: 0.8
 
 llm:
-  model: "gemini-2.0-flash-exp"
+  model: "gemini-2.5-flash"
   temperature: 0.0
 
 drift:
@@ -18,6 +18,25 @@ drift:
   sample_size: 100
   low_confidence_threshold: 0.6
   drift_threshold: 0.2
+
+severity:
+  # Sentiment-weighted severity scoring weights
+  # Must sum to 1.0 for proper normalization
+  weights:
+    sentiment: 0.45       # Negative sentiment increases severity (VADER)
+    quant_anchor: 0.35    # Dollar amounts normalized by market cap
+    keyword_count: 0.10   # Severe/moderate keyword density
+    novelty: 0.10         # YoY drift (vector similarity)
+  
+  # Keyword density normalization (per 1K words)
+  keyword_divisor: 20
+  
+  # Database path for market cap lookup
+  db_path: "database/sec_filings.db"
+  
+  # Quantitative anchor thresholds (for log fallback)
+  log_min_value: 6.0   # log10($1M)
+  log_max_value: 12.0  # log10($1T)
 
 logging:
   level: "INFO"

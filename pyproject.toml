@@ -30,6 +30,7 @@ dependencies = [
     "apscheduler>=3.10.0",
     "pyyaml>=6.0.3",
     "yfinance>=1.1.0",
+    "vaderSentiment>=3.3.2",
 ]
 
 [build-system]
@@ -71,6 +72,7 @@ module = [
     "bs4.*",
     "langchain_text_splitters.*",
     "lxml.*",
-    "google.genai.*"
+    "google.genai.*",
+    "vaderSentiment.*"
 ]
 ignore_missing_imports = true

@@ -24,6 +24,7 @@ from sigmak.drift_detection import ClassificationSource, DriftDetectionSystem
 from sigmak.embeddings import EmbeddingEngine
 from sigmak.llm_classifier import GeminiClassifier, LLMClassificationResult
 from sigmak.risk_taxonomy import RiskCategory
+from sigmak.severity import extract_numeric_anchors, SEVERE_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,60 @@ class RiskClassificationService:
             f"threshold={self.similarity_threshold}, "
             f"model={self.settings.llm.model}"
         )
+    
+    def _generate_synthetic_rationale(
+        self,
+        text: str,
+        category: RiskCategory,
+        similarity_score: float,
+        cached_record: dict
+    ) -> str:
+        """
+        Generate synthetic rationale from classification metadata.
+        
+        Used when cached rationale is missing or for borderline similarity scores.
+        
+        Args:
+            text: Risk paragraph text
+            category: Classified risk category
+            similarity_score: Vector similarity to cached classification
+            cached_record: Cached classification metadata
+            
+        Returns:
+            Synthetic rationale explaining the classification
+        """
+        # Extract features
+        dollar_amounts = extract_numeric_anchors(text)
+        severe_keywords = [kw for kw in SEVERE_KEYWORDS if kw.lower() in text.lower()]
+        
+        rationale_parts = [
+            f"This risk is classified as {category.value} based on:",
+            f"• Semantic similarity ({similarity_score:.1%}) to cached classification "
+            f"from {cached_record.get('timestamp', 'unknown')[:10]}",
+        ]
+        
+        if dollar_amounts:
+            max_amount = max(dollar_amounts)
+            if max_amount >= 1_000_000_000:
+                amount_str = f"${max_amount / 1_000_000_000:.1f}B"
+            else:
+                amount_str = f"${max_amount / 1_000_000:.1f}M"
+            rationale_parts.append(f"• Financial exposure: {amount_str}")
+        
+        if severe_keywords:
+            rationale_parts.append(
+                f"• Risk indicators: {', '.join(severe_keywords[:5])}"
+            )
+        
+        # Add confidence qualifier
+        if similarity_score >= 0.95:
+            rationale_parts.append("• High-confidence match (near-identical risk language)")
+        elif similarity_score >= 0.85:
+            rationale_parts.append("• Strong semantic overlap with cached classification")
+        else:
+            rationale_parts.append("• Moderate similarity; based on vector database match")
+        
+        return "\n".join(rationale_parts)
     
     def classify_with_cache_first(
         self,
@@ -218,12 +273,43 @@ class RiskClassificationService:
         if similarity_score >= self.similarity_threshold:
             # Reconstruct LLMClassificationResult from cached data
             from datetime import datetime
+            
+            category = RiskCategory(top_result["category"])
+            cached_evidence = top_result.get("evidence", "")
+            cached_rationale = top_result.get("rationale", "")
+            
+            # Enhance rationale based on similarity and cached data quality
+            if cached_rationale and similarity_score >= 0.90:
+                # Option 1: Reference-based rationale (high similarity, good cache)
+                enhanced_rationale = (
+                    f"Classification based on similarity to previously analyzed risk "
+                    f"(similarity: {similarity_score:.1%}).\n\n"
+                    f"Reference analysis: {cached_rationale}"
+                )
+                enhanced_evidence = cached_evidence
+            elif cached_rationale and similarity_score >= 0.80:
+                # Hybrid: Reference with synthetic supplement (borderline similarity)
+                synthetic_part = self._generate_synthetic_rationale(
+                    query_text, category, similarity_score, top_result
+                )
+                enhanced_rationale = (
+                    f"{synthetic_part}\n\n"
+                    f"Reference classification rationale: {cached_rationale[:200]}..."
+                )
+                enhanced_evidence = cached_evidence if cached_evidence else synthetic_part
+            else:
+                # Option 3: Synthetic rationale (missing cache data or low similarity)
+                enhanced_rationale = self._generate_synthetic_rationale(
+                    query_text, category, similarity_score, top_result
+                )
+                enhanced_evidence = cached_evidence if cached_evidence else enhanced_rationale
+            
             reconstructed = LLMClassificationResult(
-                category=RiskCategory(top_result["category"]),
+                category=category,
                 confidence=top_result["confidence"],
-                evidence=top_result.get("evidence", ""),
-                rationale=top_result.get("rationale", ""),
-                model_version=top_result.get("model_version", "cached"),
+                evidence=enhanced_evidence,
+                rationale=enhanced_rationale,
+                model_version=f"cache-v{top_result.get('model_version', 'unknown')}",
                 prompt_version=top_result.get("prompt_version", "unknown"),
                 timestamp=datetime.fromisoformat(top_result["timestamp"]),
                 response_time_ms=0.0,  # Cached, no API call

@@ -41,6 +41,135 @@ if TYPE_CHECKING:
 load_dotenv()
 
 
+def validate_cached_result(data: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Validate that cached JSON has required fields.
+    
+    Args:
+        data: Loaded JSON data
+        
+    Returns:
+        Tuple of (is_valid, reason_if_invalid)
+    """
+    risks = data.get('risks', [])
+    if not risks:
+        return True, ""  # Empty results are valid
+    
+    # Check for classification fields
+    missing_classification = False
+    missing_llm_fields = False
+    
+    for risk in risks:
+        # Check if risk has category
+        if not risk.get('category'):
+            missing_classification = True
+        
+        # Check if risk has LLM evidence/rationale when classified by LLM
+        if risk.get('classification_method') == 'llm':
+            if not risk.get('llm_evidence') or not risk.get('llm_rationale'):
+                missing_llm_fields = True
+                break
+    
+    if missing_classification:
+        return False, "missing risk classification"
+    if missing_llm_fields:
+        return False, "missing llm_evidence or llm_rationale fields"
+    
+    return True, ""
+
+
+def enrich_result_with_classification(
+    result: "RiskAnalysisResult",
+    pipeline: IntegrationPipeline,
+    force_llm: bool = False
+) -> "RiskAnalysisResult":
+    """
+    Enrich result with classification, preserving existing LLM fields.
+    
+    Args:
+        result: Risk analysis result to enrich
+        pipeline: Integration pipeline instance
+        force_llm: Force LLM classification even if cached
+        
+    Returns:
+        Enriched result with classifications and LLM evidence/rationale
+    """
+    use_full_service = False
+    classification_service = None
+    if os.getenv('GOOGLE_API_KEY'):
+        try:
+            classification_service = RiskClassificationService(drift_system=pipeline.drift_system)
+            use_full_service = True
+        except Exception:
+            use_full_service = False
+
+    for r in result.risks:
+        try:
+            # Skip if already has valid classification and LLM fields
+            if not force_llm and r.get('category') and r.get('category') != 'UNCATEGORIZED':
+                if r.get('classification_method') != 'llm':
+                    # Non-LLM classification, keep as-is
+                    continue
+                if r.get('llm_evidence') and r.get('llm_rationale'):
+                    # LLM classification with evidence/rationale, keep as-is
+                    continue
+            
+            # Need to classify or re-classify
+            if r.get('metadata', {}).get('category'):
+                r['category'] = r['metadata']['category']
+                r['category_confidence'] = r['metadata'].get('confidence', 0.0)
+                r['classification_method'] = r['metadata'].get('classification_source', 'vector')
+                continue
+
+            if use_full_service and classification_service:
+                try:
+                    llm_result, source = classification_service.classify_with_cache_first(r['text'])
+                    r['category'] = llm_result.category.value
+                    r['category_confidence'] = llm_result.confidence
+                    r['classification_method'] = source
+                    
+                    # CRITICAL: Always capture LLM evidence and rationale
+                    if llm_result.evidence:
+                        r['llm_evidence'] = llm_result.evidence
+                    if llm_result.rationale:
+                        r['llm_rationale'] = llm_result.rationale
+                        
+                except Exception as e:
+                    print(f"   ⚠️  Classification failed for risk: {e}")
+                    r['category'] = 'UNCATEGORIZED'
+                    r['category_confidence'] = 0.0
+                    r['classification_method'] = 'error'
+            else:
+                # Cache-only classification via DriftDetectionSystem
+                try:
+                    embedding = pipeline.indexing_pipeline.embeddings.encode([r['text']])[0].tolist()
+                    cache_results = pipeline.drift_system.similarity_search(query_embedding=embedding, n_results=1)
+                    if cache_results and cache_results[0].get('similarity_score', 0.0) >= 0.8:
+                        top = cache_results[0]
+                        r['category'] = top.get('category', 'UNCATEGORIZED')
+                        r['category_confidence'] = float(top.get('confidence', 0.0))
+                        r['classification_method'] = 'vector_db'
+                        # Try to get LLM fields from cache if available
+                        if top.get('evidence'):
+                            r['llm_evidence'] = top['evidence']
+                        if top.get('rationale'):
+                            r['llm_rationale'] = top['rationale']
+                    else:
+                        r['category'] = 'UNCATEGORIZED'
+                        r['category_confidence'] = 0.0
+                        r['classification_method'] = 'db_only_no_match'
+                except Exception as e:
+                    print(f"   ⚠️  Cache lookup failed for risk: {e}")
+                    r['category'] = 'UNCATEGORIZED'
+                    r['category_confidence'] = 0.0
+                    r['classification_method'] = 'error'
+        except Exception as e:
+            print(f"   ⚠️  Error enriching risk: {e}")
+            continue
+
+    return result
+
+
 def load_or_analyze_filing(
     pipeline: IntegrationPipeline,
     html_path: str,
@@ -72,6 +201,10 @@ def load_or_analyze_filing(
         print(f"📂 Loading cached results for {ticker} {year}...")
         with open(cache_file, 'r') as f:
             data = json.load(f)
+            
+            # Validate cached results
+            is_valid, reason = validate_cached_result(data)
+            
             # If cached result was generated without reranking enabled,
             # re-run analysis to ensure reranking is applied (default: rerank=True).
             if not data.get('metadata', {}).get('rerank', True):
@@ -83,9 +216,28 @@ def load_or_analyze_filing(
                     retrieve_top_k=retrieve_top_k,
                     rerank=True
                 )
+                # Enrich with classification
+                result = enrich_result_with_classification(result, pipeline)
                 # Update cache
                 with open(cache_file, 'w') as wf:
                     wf.write(result.to_json())
+                return result
+            
+            # If validation failed, re-enrich and update cache
+            if not is_valid:
+                print(f"⚠️  Cached results for {ticker} {year} incomplete ({reason}); re-enriching...")
+                result = RiskAnalysisResult(
+                    ticker=data['ticker'],
+                    filing_year=data['filing_year'],
+                    risks=data['risks'],
+                    metadata=data['metadata']
+                )
+                # Re-enrich with classification to get missing fields
+                result = enrich_result_with_classification(result, pipeline, force_llm=True)
+                # Update cache with enriched data
+                with open(cache_file, 'w') as wf:
+                    wf.write(result.to_json())
+                print(f"   ✅ Re-enriched and updated cache for {ticker} {year}")
                 return result
 
             return RiskAnalysisResult(
@@ -105,59 +257,14 @@ def load_or_analyze_filing(
         rerank=True
     )
     
-    # Cache results
-    with open(cache_file, 'w') as f:
-        f.write(result.to_json())
     print(f"   ✅ Indexed {result.metadata['chunks_indexed']} chunks in {result.metadata['total_latency_ms']:.0f}ms")
     
-    # Enrich result with similarity-first classification (vector DB -> LLM)
-    use_full_service = False
-    classification_service = None
-    if os.getenv('GOOGLE_API_KEY'):
-        try:
-            classification_service = RiskClassificationService(drift_system=pipeline.drift_system)
-            use_full_service = True
-        except Exception:
-            use_full_service = False
-
-    for r in result.risks:
-        try:
-            if r.get('metadata', {}).get('category'):
-                r['category'] = r['metadata']['category']
-                r['category_confidence'] = r['metadata'].get('confidence', 0.0)
-                r['classification_method'] = r['metadata'].get('classification_source', 'vector')
-                continue
-
-            if use_full_service and classification_service:
-                try:
-                    llm_result, source = classification_service.classify_with_cache_first(r['text'])
-                    r['category'] = llm_result.category.value
-                    r['category_confidence'] = llm_result.confidence
-                    r['classification_method'] = source
-                except Exception:
-                    r['category'] = 'UNCATEGORIZED'
-                    r['category_confidence'] = 0.0
-                    r['classification_method'] = 'error'
-            else:
-                # Cache-only classification via DriftDetectionSystem
-                try:
-                    embedding = pipeline.indexing_pipeline.embeddings.encode([r['text']])[0].tolist()
-                    cache_results = pipeline.drift_system.similarity_search(query_embedding=embedding, n_results=1)
-                    if cache_results and cache_results[0].get('similarity_score', 0.0) >= 0.8:
-                        top = cache_results[0]
-                        r['category'] = top.get('category', 'UNCATEGORIZED')
-                        r['category_confidence'] = float(top.get('confidence', 0.0))
-                        r['classification_method'] = 'vector_db'
-                    else:
-                        r['category'] = 'UNCATEGORIZED'
-                        r['category_confidence'] = 0.0
-                        r['classification_method'] = 'db_only_no_match'
-                except Exception:
-                    r['category'] = 'UNCATEGORIZED'
-                    r['category_confidence'] = 0.0
-                    r['classification_method'] = 'error'
-        except Exception:
-            continue
+    # Enrich result with classification (preserves LLM evidence/rationale)
+    result = enrich_result_with_classification(result, pipeline)
+    
+    # Cache results with all enrichments
+    with open(cache_file, 'w') as f:
+        f.write(result.to_json())
 
     return result
 
@@ -522,7 +629,8 @@ def generate_markdown_report(
     if total_disappeared > 0:
         report_lines.append(f"✅ **RESOLVED:** {total_disappeared} risk factor(s) dropped from disclosure — potential business improvement or strategic pivot.")
     
-    if high_severity >= len(latest_result.risks) * 0.4:
+    # Safety check: only show alert if we have risks to analyze
+    if len(latest_result.risks) > 0 and high_severity >= len(latest_result.risks) * 0.4:
         report_lines.append(f"⚠️ **ALERT:** {100*high_severity/len(latest_result.risks):.0f}% of disclosures are high severity — elevated risk profile requires close portfolio monitoring.")
     
     report_lines.append("")
@@ -531,9 +639,16 @@ def generate_markdown_report(
     report_lines.append("| Severity Level | Count | % of Total |")
     report_lines.append("|----------------|-------|------------|")
     total_risks = len(latest_severities)
-    report_lines.append(f"| High (≥0.70) | {high_severity} | {100*high_severity/total_risks:.0f}% |")
-    report_lines.append(f"| Medium (0.40-0.69) | {medium_severity} | {100*medium_severity/total_risks:.0f}% |")
-    report_lines.append(f"| Low (<0.40) | {low_severity} | {100*low_severity/total_risks:.0f}% |")
+    
+    # Safety check: prevent division by zero
+    if total_risks > 0:
+        report_lines.append(f"| High (≥0.70) | {high_severity} | {100*high_severity/total_risks:.0f}% |")
+        report_lines.append(f"| Medium (0.40-0.69) | {medium_severity} | {100*medium_severity/total_risks:.0f}% |")
+        report_lines.append(f"| Low (<0.40) | {low_severity} | {100*low_severity/total_risks:.0f}% |")
+    else:
+        report_lines.append("| High (≥0.70) | 0 | 0% |")
+        report_lines.append("| Medium (0.40-0.69) | 0 | 0% |")
+        report_lines.append("| Low (<0.40) | 0 | 0% |")
     report_lines.append("")
     
     # Add severity legend and percentile
@@ -718,11 +833,29 @@ def generate_markdown_report(
         
         report_lines.append(f"### {i}. {risk_label} — {category}{status_badge}")
         report_lines.append("")
-        report_lines.append(f"_Severity: {severity_val:.2f} | Novelty: {novelty_val:.2f}_")
+        report_lines.append(f"_Severity: {severity_val:.2f} | Novelty: {novelty_val:.2f} | Confidence: {confidence}_")
         report_lines.append("")
         report_lines.append(f"> {text_preview}...")
         report_lines.append("")
-        report_lines.append(f"**Impact:** {impact_label} | **Confidence:** {confidence} | **Evidence:** [{evidence_short}]({evidence_url}) | **Monitoring:** {monitoring}")
+        
+        # Add LLM classification reasoning if available
+        llm_evidence = risk.get('llm_evidence', '')
+        llm_rationale = risk.get('llm_rationale', '')
+        
+        if llm_rationale:
+            report_lines.append(f"**Classification Rationale:** {llm_rationale}")
+            report_lines.append("")
+        
+        if llm_evidence:
+            # Clean and truncate evidence if too long
+            evidence_text = llm_evidence.replace('\n', ' ').strip()
+            if len(evidence_text) > 400:
+                evidence_text = evidence_text[:397] + "..."
+            report_lines.append(f"**Key Risk Factors:** {evidence_text}")
+            report_lines.append("")
+        
+        # Add filing citation
+        report_lines.append(f"**Filing Reference:** [View in 10-K]({evidence_url})")
         report_lines.append("")
         report_lines.append("---")
         report_lines.append("")

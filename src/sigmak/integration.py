@@ -289,8 +289,11 @@ class IntegrationPipeline:
         risks = []
         for chunk in search_results:
             try:
-                # Compute severity
-                severity_score = self.scorer.calculate_severity(chunk)
+                # Compute severity (NEW: pass chroma_collection for novelty component)
+                severity_score = self.scorer.calculate_severity(
+                    chunk,
+                    chroma_collection=self.indexing_pipeline.collection
+                )
                 
                 # Compute novelty (compare with historical filings)
                 historical_chunks = self._get_historical_chunks(ticker, filing_year)

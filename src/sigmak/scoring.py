@@ -6,6 +6,7 @@ with full source citation and traceability.
 
 Core Concepts:
 - Severity: How severe is this risk? (0.0 = minor, 1.0 = catastrophic)
+  - Uses sentiment-weighted scoring (VADER + quantitative anchors + keywords + novelty)
 - Novelty: How new is this risk vs. historical filings? (0.0 = repetitive, 1.0 = novel)
 
 Every score includes:
@@ -20,8 +21,14 @@ from typing import Dict, Any, List, Optional
 import logging
 import numpy as np
 from numpy.typing import NDArray
+import yaml
 
 from sigmak.embeddings import EmbeddingEngine
+from sigmak.severity import (
+    compute_severity,
+    get_market_cap,
+    DEFAULT_WEIGHTS as SEVERITY_DEFAULT_WEIGHTS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +111,10 @@ class RiskScorer:
     """
     Computes Severity and Novelty scores for risk disclosures.
     
-    Severity Scoring:
-    - Analyzes keyword presence and semantic intensity
-    - Higher scores for catastrophic/existential language
+    Severity Scoring (NEW - Sentiment-Weighted):
+    - Combines sentiment analysis, quantitative anchors, keyword density, and novelty
+    - Uses VADER for sentiment, extracts dollar amounts, counts risk keywords
+    - Normalizes by market cap when available
     - Range: [0.0, 1.0]
     
     Novelty Scoring:
@@ -117,19 +125,35 @@ class RiskScorer:
     Usage:
         >>> scorer = RiskScorer()
         >>> chunk = {"text": "...", "metadata": {...}}
-        >>> severity = scorer.calculate_severity(chunk)
+        >>> severity = scorer.calculate_severity(chunk, chroma_collection)
         >>> novelty = scorer.calculate_novelty(chunk, historical_chunks)
     """
     
-    def __init__(self, embeddings: Optional[EmbeddingEngine] = None) -> None:
+    def __init__(
+        self,
+        embeddings: Optional[EmbeddingEngine] = None,
+        config_path: str = "config.yaml"
+    ) -> None:
         """
         Initialize risk scorer.
         
         Args:
             embeddings: Optional pre-initialized embedding engine.
                        If None, will create a new instance (lazy loading).
+            config_path: Path to config YAML with severity weights
         """
         self._embeddings = embeddings
+        self._severity_weights = self._load_severity_config(config_path)
+    
+    def _load_severity_config(self, config_path: str) -> Dict[str, float]:
+        """Load severity weights from config file."""
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+                return config.get("severity", {}).get("weights", SEVERITY_DEFAULT_WEIGHTS)
+        except Exception:
+            logger.warning(f"Could not load config from {config_path}, using defaults")
+            return SEVERITY_DEFAULT_WEIGHTS
     
     @property
     def embeddings(self) -> EmbeddingEngine:
@@ -139,22 +163,33 @@ class RiskScorer:
         return self._embeddings
     
     # ========================================================================
-    # Severity Scoring
+    # Severity Scoring (NEW IMPLEMENTATION)
     # ========================================================================
     
-    def calculate_severity(self, chunk: Any) -> RiskScore:
+    def calculate_severity(
+        self,
+        chunk: Any,
+        chroma_collection: Optional[Any] = None
+    ) -> RiskScore:
         """
-        Calculate severity score for a risk disclosure chunk.
+        Calculate severity score using sentiment-weighted system.
         
-        Algorithm:
-        1. Validate input structure
-        2. Extract text and convert to lowercase
-        3. Count severe/moderate keyword matches
-        4. Normalize to [0.0, 1.0] using weighted formula
-        5. Generate explanation and citation
+        NEW ALGORITHM (replaces keyword-only scoring):
+        1. Extract dollar amounts and normalize by market cap
+        2. Compute sentiment score (negative = high severity)
+        3. Count severe/moderate keywords
+        4. Measure novelty via YoY drift (requires chroma_collection)
+        5. Combine with weighted formula
+        
+        Formula:
+            severity = w_sentiment * sentiment_score +
+                      w_quant * quant_anchor_score +
+                      w_keyword * keyword_count_score +
+                      w_novelty * novelty_score
         
         Args:
             chunk: Dictionary with 'text' and 'metadata' fields
+            chroma_collection: Optional ChromaDB collection for novelty calculation
         
         Returns:
             RiskScore with severity value, citation, explanation, metadata
@@ -164,11 +199,11 @@ class RiskScorer:
         
         Example:
             >>> chunk = {
-            ...     "text": "Catastrophic supply chain failure",
-            ...     "metadata": {"ticker": "AAPL", "filing_year": 2025}
+            ...     "text": "We may face losses of $4.9B due to supply chain crisis",
+            ...     "metadata": {"ticker": "BA", "filing_year": 2025}
             ... }
-            >>> score = scorer.calculate_severity(chunk)
-            >>> assert 0.7 <= score.value <= 1.0  # High severity
+            >>> score = scorer.calculate_severity(chunk, chroma_collection)
+            >>> assert score.value > 0.5  # High severity due to $ amount + keywords
         """
         # Validate input
         self._validate_chunk(chunk)
@@ -180,29 +215,33 @@ class RiskScorer:
         if not text or not text.strip():
             raise ScoringError("Cannot score empty text")
         
-        # Convert to lowercase for keyword matching
-        text_lower = text.lower()
+        # Extract required metadata
+        ticker = metadata.get("ticker", "UNKNOWN")
+        year = metadata.get("filing_year", 2025)
         
-        # Count keyword matches
-        severe_matches = sum(1 for keyword in SEVERE_KEYWORDS if keyword in text_lower)
-        moderate_matches = sum(1 for keyword in MODERATE_KEYWORDS if keyword in text_lower)
+        # Get market cap from database
+        market_cap = get_market_cap(ticker)
         
-        # Calculate severity score using weighted formula
-        # Severe keywords weighted 2x moderate keywords
-        # Normalize by expected maximum (assume max 5 severe + 5 moderate keywords)
-        raw_score = (severe_matches * 2.0 + moderate_matches * 1.0) / 15.0
+        # Generate embedding for novelty calculation
+        try:
+            embedding = self.embeddings.encode([text])[0].tolist()
+        except Exception as e:
+            logger.warning(f"Embedding generation failed: {e}, using zeros")
+            embedding = [0.0] * 384  # Fallback
         
-        # Clamp to [0.0, 1.0]
-        severity_value = min(1.0, max(0.0, raw_score))
-        
-        # Boost score if multiple severe keywords (indicates compound risk)
-        if severe_matches >= 3:
-            severity_value = min(1.0, severity_value * 1.2)
-        
-        # Generate explanation
-        explanation = self._generate_severity_explanation(
-            severity_value, severe_matches, moderate_matches
+        # Compute integrated severity score
+        severity_value, explanation_dict = compute_severity(
+            text=text,
+            ticker=ticker,
+            market_cap=market_cap,
+            year=year,
+            embedding=embedding,
+            chroma_collection=chroma_collection,
+            weights=self._severity_weights
         )
+        
+        # Build human-readable explanation
+        explanation = self._build_severity_explanation(severity_value, explanation_dict)
         
         # Truncate citation for readability (max 500 chars)
         citation = text if len(text) <= 500 else text[:497] + "..."
@@ -214,54 +253,71 @@ class RiskScorer:
             metadata=metadata
         )
     
-    def calculate_severity_batch(self, chunks: List[Dict[str, Any]]) -> List[RiskScore]:
+    def _build_severity_explanation(
+        self,
+        severity: float,
+        components: Dict[str, Any]
+    ) -> str:
+        """Build human-readable explanation from component scores."""
+        dominant = components["dominant_component"]
+        amounts = components["extracted_amounts"]
+        
+        # Format dollar amounts
+        if amounts:
+            max_amount = max(amounts)
+            if max_amount >= 1_000_000_000:
+                amount_str = f"${max_amount / 1_000_000_000:.1f}B"
+            else:
+                amount_str = f"${max_amount / 1_000_000:.1f}M"
+        else:
+            amount_str = "no quantitative anchors"
+        
+        # Build explanation based on severity level
+        if severity >= 0.7:
+            level = "High"
+            desc = "indicates catastrophic or existential risk"
+        elif severity >= 0.5:
+            level = "Moderate-high"
+            desc = "indicates significant business risk"
+        elif severity >= 0.3:
+            level = "Moderate"
+            desc = "indicates manageable business risk"
+        else:
+            level = "Low"
+            desc = "indicates routine business considerations"
+        
+        return (
+            f"{level} severity (score: {severity:.2f}). "
+            f"Dominant factor: {dominant} "
+            f"(sentiment={components['sentiment_score']:.2f}, "
+            f"quant={components['quant_anchor_score']:.2f}, "
+            f"keywords={components['keyword_count_score']:.2f}, "
+            f"novelty={components['novelty_score']:.2f}). "
+            f"Extracted amounts: {amount_str}. "
+            f"Analysis {desc}."
+        )
+    
+    def calculate_severity_batch(
+        self,
+        chunks: List[Dict[str, Any]],
+        chroma_collection: Optional[Any] = None
+    ) -> List[RiskScore]:
         """
         Calculate severity scores for multiple chunks efficiently.
         
         Args:
             chunks: List of chunk dictionaries
+            chroma_collection: Optional ChromaDB collection for novelty
         
         Returns:
             List of RiskScore objects (same order as input)
         
         Example:
             >>> chunks = [{"text": "...", "metadata": {...}}, ...]
-            >>> scores = scorer.calculate_severity_batch(chunks)
+            >>> scores = scorer.calculate_severity_batch(chunks, chroma_collection)
             >>> assert len(scores) == len(chunks)
         """
-        return [self.calculate_severity(chunk) for chunk in chunks]
-    
-    def _generate_severity_explanation(
-        self,
-        severity: float,
-        severe_count: int,
-        moderate_count: int
-    ) -> str:
-        """Generate human-readable explanation for severity score."""
-        if severity >= 0.8:
-            return (
-                f"High severity (score: {severity:.2f}). "
-                f"Contains {severe_count} severe keywords and {moderate_count} moderate keywords. "
-                f"Language indicates catastrophic or existential risk."
-            )
-        elif severity >= 0.5:
-            return (
-                f"Moderate severity (score: {severity:.2f}). "
-                f"Contains {severe_count} severe keywords and {moderate_count} moderate keywords. "
-                f"Language indicates significant business risk."
-            )
-        elif severity >= 0.2:
-            return (
-                f"Low-moderate severity (score: {severity:.2f}). "
-                f"Contains {severe_count} severe keywords and {moderate_count} moderate keywords. "
-                f"Language indicates manageable business risk."
-            )
-        else:
-            return (
-                f"Low severity (score: {severity:.2f}). "
-                f"Contains {severe_count} severe keywords and {moderate_count} moderate keywords. "
-                f"Language indicates routine business considerations."
-            )
+        return [self.calculate_severity(chunk, chroma_collection) for chunk in chunks]
     
     # ========================================================================
     # Novelty Scoring
