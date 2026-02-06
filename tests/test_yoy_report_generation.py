@@ -60,19 +60,19 @@ class TestRiskOrdering:
         # Create risks with different novelty/severity combinations
         risks = [
             {
-                "text": "Risk 1: High severity, low novelty. " * 50,  # Make it long enough
+                "text": "Risk 1: High severity, low novelty. Our operational infrastructure faces severe challenges. " * 50,
                 "severity": {"value": 0.9, "explanation": "Very severe"},
                 "novelty": {"value": 0.2, "explanation": "Not novel"},
                 "category": "OPERATIONAL"
             },
             {
-                "text": "Risk 2: Medium severity, high novelty. " * 50,
+                "text": "Risk 2: Medium severity, high novelty. New regulatory framework creates uncertainty. " * 50,
                 "severity": {"value": 0.5, "explanation": "Moderate"},
                 "novelty": {"value": 0.8, "explanation": "Very novel"},
                 "category": "REGULATORY"
             },
             {
-                "text": "Risk 3: Low severity, medium novelty. " * 50,
+                "text": "Risk 3: Low severity, medium novelty. Financial market conditions are moderately concerning. " * 50,
                 "severity": {"value": 0.3, "explanation": "Minor"},
                 "novelty": {"value": 0.5, "explanation": "Somewhat novel"},
                 "category": "FINANCIAL"
@@ -90,21 +90,25 @@ class TestRiskOrdering:
             with open(output_file, 'r') as f:
                 content = f.read()
             
-            # Find positions of each risk in the report
-            # Look for the category names which are unique
-            regulatory_pos = content.find("REGULATORY")
-            financial_pos = content.find("FINANCIAL")
-            operational_pos = content.find("OPERATIONAL")
+            # Find the Material Risk Factors section
+            material_section_start = content.find("## Material Risk Factors")
+            assert material_section_start > 0, "Material Risk Factors section not found"
             
-            # Risk 2 (REGULATORY, novelty 0.8) should appear first
-            # Risk 3 (FINANCIAL, novelty 0.5) should appear second
-            # Risk 1 (OPERATIONAL, novelty 0.2) should appear third
+            # Only look within the Material Risk Factors section (next 5000 chars)
+            material_section = content[material_section_start:material_section_start + 5000]
+            
+            # Find positions of each risk in the material section
+            # Look for unique text from each risk
+            regulatory_pos = material_section.find("regulatory framework")
+            financial_pos = material_section.find("Financial market conditions")
+            operational_pos = material_section.find("operational infrastructure")
+            
             # All should appear (none are -1)
-            assert regulatory_pos > 0, "REGULATORY risk not found"
-            assert financial_pos > 0, "FINANCIAL risk not found"
-            assert operational_pos > 0, "OPERATIONAL risk not found"
+            assert regulatory_pos > 0, "REGULATORY risk not found in Material Risk Factors"
+            assert financial_pos > 0, "FINANCIAL risk not found in Material Risk Factors"
+            assert operational_pos > 0, "OPERATIONAL risk not found in Material Risk Factors"
             
-            # Check order: REGULATORY should come before FINANCIAL, which should come before OPERATIONAL
+            # Check order: REGULATORY (novelty 0.8) should come before FINANCIAL (0.5), which should come before OPERATIONAL (0.2)
             assert regulatory_pos < financial_pos, \
                 f"REGULATORY {regulatory_pos} should come before FINANCIAL {financial_pos}"
             assert financial_pos < operational_pos, \

@@ -400,6 +400,14 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
         lines.append("- Jaccard histogram: error computing histogram")
         lines.append("")
 
+    # Add legal disclaimer
+    lines.append("---")
+    lines.append("")
+    lines.append("## Legal Disclaimer")
+    lines.append("")
+    lines.append("**USE AT YOUR OWN RISK.** This report is for informational purposes only and does not constitute investment advice, financial advice, trading advice, or any other sort of advice. We do not recommend that any investment decision be made based on this report. We cannot guarantee investment returns and you may lose money. Past performance is not indicative of future results.")
+    lines.append("")
+
     # finally write the completed Markdown report
     outpath.parent.mkdir(parents=True, exist_ok=True)
     outpath.write_text("\n".join(lines), encoding="utf-8")

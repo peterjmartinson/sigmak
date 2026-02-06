@@ -146,7 +146,7 @@ def enrich_result_with_classification(
                         r['llm_rationale'] = llm_result.rationale
                         
                 except Exception as e:
-                    print(f"   ⚠️  Classification failed for risk: {e}")
+                    print(f"   [WARNING] Classification failed for risk: {e}")
                     r['category'] = 'UNCATEGORIZED'
                     r['category_confidence'] = 0.0
                     r['classification_method'] = 'error'
@@ -170,12 +170,12 @@ def enrich_result_with_classification(
                         r['category_confidence'] = 0.0
                         r['classification_method'] = 'db_only_no_match'
                 except Exception as e:
-                    print(f"   ⚠️  Cache lookup failed for risk: {e}")
+                    print(f"   [WARNING] Cache lookup failed for risk: {e}")
                     r['category'] = 'UNCATEGORIZED'
                     r['category_confidence'] = 0.0
                     r['classification_method'] = 'error'
         except Exception as e:
-            print(f"   ⚠️  Error enriching risk: {e}")
+            print(f"   [WARNING] Error enriching risk: {e}")
             continue
 
     return result
@@ -236,7 +236,7 @@ def load_or_analyze_filing(
             
             # If validation failed, re-enrich and update cache
             if not is_valid:
-                print(f"⚠️  Cached results for {ticker} {year} incomplete ({reason}); re-enriching...")
+                print(f"[WARNING] Cached results for {ticker} {year} incomplete ({reason}); re-enriching...")
                 result = RiskAnalysisResult(
                     ticker=data['ticker'],
                     filing_year=data['filing_year'],
@@ -576,10 +576,10 @@ def generate_markdown_report(
     missing_token = filings_db.MISSING_TOKEN
     if any(provenance.get(k) == missing_token for k in ('accession', 'cik', 'sec_url')):
         # Console warning to alert the user during run
-        print(f"⚠️  Missing provenance identifiers for {ticker} {latest_year} — see output/missing_identifiers.csv")
+        print(f"[WARNING] Missing provenance identifiers for {ticker} {latest_year} — see output/missing_identifiers.csv")
         sys.stdout.flush()
         report_lines.append("")
-        report_lines.append("**⚠️  Missing provenance identifiers:** One or more filing identifiers (accession, CIK, or SEC URL) were not found in the local filings DB.")
+        report_lines.append("**[WARNING] Missing provenance identifiers:** One or more filing identifiers (accession, CIK, or SEC URL) were not found in the local filings DB.")
         report_lines.append("See `output/missing_identifiers.csv` for audit details and run the downloader to populate missing records.")
         report_lines.append("")
     report_lines.append(f"**Historical Comparison:** {years[0]}–{years[-1]}")
@@ -793,11 +793,17 @@ def generate_markdown_report(
         status_badge = ""
         if novelty_val >= 0.50:
             status_badge = " [NEW]"
+        
+        # Check if this risk was in previous years (dropped status)
+        for dropped in changes['disappeared_risks']:
             dropped_text = dropped['risk']['text']
             similarity = calculate_risk_similarity(risk['text'], dropped_text)
             if similarity >= 0.4:
                 dropped_year = dropped['year']
                 status_badge = f" [DROPPED - previously disclosed in {dropped_year}]"
+                break
+        
+        # Determine confidence level
         if severity_val >= 0.80 and novelty_val >= 0.20:
             confidence = "High"
         elif (0.50 <= severity_val < 0.80) or (0.10 <= novelty_val <= 0.49):
@@ -1131,7 +1137,7 @@ Examples:
                 break
 
         if not found:
-            print(f"⚠️  Could not find filing for {ticker} {year}")
+            print(f"[WARNING] Could not find filing for {ticker} {year}")
             print(f"    Searched under: {', '.join(str(p) for p in search_dirs if p.exists())}")
             sys.exit(1)
     

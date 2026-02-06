@@ -23,26 +23,25 @@ def is_boilerplate_intro(text: str) -> bool:
     text_lower = text.lower()
     word_count = len(text.split())
     
-    # Pattern 1: Direct Item 1A title (most common)
-    if re.search(r"item\s+1a[.\s\-:]+risk\s+factors", text_lower):
-        # If it's short (< 50 words), definitely boilerplate
-        if word_count < 50:
-            return True
-        # If it contains generic intro phrases, likely boilerplate
-        intro_phrases = [
-            "in this section",
-            "described below",
-            "following risks",
-            "we are subject to",
-            "includes the following",
-            "set forth below"
-        ]
-        if any(phrase in text_lower for phrase in intro_phrases):
-            return True
-    
-    # Pattern 2: Very short chunks that are just section markers
-    if word_count < 15 and re.search(r"item\s+1a", text_lower):
+    # Only filter very short chunks that are just section markers
+    if word_count < 20 and re.search(r"item\s+1a", text_lower):
         return True
+    
+    # For longer chunks, only filter if they're BOTH:
+    # 1. Short (< 50 words)
+    # 2. Contain Item 1A header AND generic intro phrases  
+    if word_count < 50:
+        has_item_1a = re.search(r"item\s+1a[.\s\-:]+risk\s+factors", text_lower)
+        if has_item_1a:
+            intro_phrases = [
+                "in this section, we describe",
+                "the following describes",
+                "following risk factors",
+                "principal risks we face"
+            ]
+            # Only filter if it has any of these very specific intro templates
+            if any(phrase in text_lower for phrase in intro_phrases):
+                return True
     
     return False
 
