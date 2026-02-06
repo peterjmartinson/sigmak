@@ -518,6 +518,59 @@ def get_all_peer_tickers(db_path: str) -> List[str]:
         return [r[0] for r in cur.fetchall()]
 
 
+def get_company_name(db_path: str, ticker: str) -> Optional[str]:
+    """Return the company name for a ticker from peers table.
+    
+    Args:
+        db_path: Path to the SQLite database
+        ticker: Stock ticker symbol
+        
+    Returns:
+        Company name if found in peers table, None otherwise
+    """
+    peer = get_peer(db_path, ticker)
+    if peer and peer.get("name"):
+        return peer["name"]
+    return None
+
+
+def get_company_name_with_fallback(db_path: str, ticker: str) -> str:
+    """Return the company name for a ticker, with SEC API fallback.
+    
+    This function first checks the local peers table. If not found,
+    it attempts to fetch the company name from the SEC API.
+    
+    BEHAVIOR CHANGE POINT: Modify this function if you want to change
+    the fallback behavior (e.g., skip API call, use different timeout, etc.)
+    
+    Args:
+        db_path: Path to the SQLite database
+        ticker: Stock ticker symbol
+        
+    Returns:
+        Company name if found, otherwise returns the ticker symbol
+    """
+    # First try: local database
+    name = get_company_name(db_path, ticker)
+    if name:
+        return name
+    
+    # Second try: SEC API fallback
+    # Import here to avoid circular dependencies and reduce load time
+    try:
+        from sigmak.downloads.tenk_downloader import fetch_company_submissions
+        
+        submissions = fetch_company_submissions(ticker)
+        if submissions and "name" in submissions:
+            return submissions["name"]
+    except Exception:
+        # Suppress errors - if API call fails, just use ticker
+        pass
+    
+    # Final fallback: return ticker
+    return ticker.upper()
+
+
 def populate_market_cap(db_path: str, tickers: Optional[List[str]] = None, delay: float = 1.0) -> int:
     """Populate `market_cap` for peers using `yfinance`.
 

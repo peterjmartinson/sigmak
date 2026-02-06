@@ -28,7 +28,9 @@ import re
 import json
 from collections import defaultdict
 from dotenv import load_dotenv
+import yaml
 from sigmak import filings_db
+from sigmak.filings_db import get_company_name_with_fallback
 from sigmak.integration import IntegrationPipeline
 from sigmak.risk_classification_service import RiskClassificationService
 import os
@@ -39,6 +41,15 @@ if TYPE_CHECKING:
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+def load_config() -> Dict[str, Any]:
+    """Load configuration from config.yaml."""
+    config_path = Path(__file__).parent.parent / "config.yaml"
+    if config_path.exists():
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+    return {}
 
 
 def validate_cached_result(data: Dict[str, Any]) -> Tuple[bool, str]:
@@ -535,11 +546,21 @@ def generate_markdown_report(
     latest_year = latest_result.filing_year
     changes = identify_risk_changes(results_sorted)
     
+    # Load config for thresholds
+    config = load_config()
+    min_severity = config.get('report_generation', {}).get('min_severity_threshold', 0.3)
+    min_novelty = config.get('report_generation', {}).get('min_novelty_threshold', 0.4)
+    
+    # Get company name with fallback to SEC API
+    if filings_db_path is None:
+        filings_db_path = "./database/sec_filings.db"
+    company_name = get_company_name_with_fallback(filings_db_path, ticker)
+    
     # Build the report
     report_lines = []
     
-    # Header
-    report_lines.append(f"# {ticker} — Risk Factor Analysis")
+    # Header with company name
+    report_lines.append(f"# {company_name} ({ticker}) — Risk Factor Analysis")
     report_lines.append(f"## Item 1A Deep Dive: {latest_year} 10-K")
     report_lines.append("")
     report_lines.append(f"**Report Date:** {datetime.now().strftime('%B %d, %Y')}")
@@ -624,14 +645,14 @@ def generate_markdown_report(
     report_lines.append("")
     
     if total_new > 0:
-        report_lines.append(f"🚨 **NEW:** {total_new} risk factor(s) added — signals shifting exposure; review disclosure language for operational changes.")
+        report_lines.append(f"[NEW] {total_new} risk factor(s) added — signals shifting exposure; review disclosure language for operational changes.")
     
     if total_disappeared > 0:
-        report_lines.append(f"✅ **RESOLVED:** {total_disappeared} risk factor(s) dropped from disclosure — potential business improvement or strategic pivot.")
+        report_lines.append(f"[RESOLVED] {total_disappeared} risk factor(s) dropped from disclosure — potential business improvement or strategic pivot.")
     
     # Safety check: only show alert if we have risks to analyze
     if len(latest_result.risks) > 0 and high_severity >= len(latest_result.risks) * 0.4:
-        report_lines.append(f"⚠️ **ALERT:** {100*high_severity/len(latest_result.risks):.0f}% of disclosures are high severity — elevated risk profile requires close portfolio monitoring.")
+        report_lines.append(f"[ALERT] {100*high_severity/len(latest_result.risks):.0f}% of disclosures are high severity — elevated risk profile requires close portfolio monitoring.")
     
     report_lines.append("")
     report_lines.append("### Risk Severity Distribution")
@@ -651,8 +672,8 @@ def generate_markdown_report(
         report_lines.append("| Low (<0.40) | 0 | 0% |")
     report_lines.append("")
     
-    # Add severity legend and percentile
-    report_lines.append("**Severity Legend:** 🔴 Critical ≥0.75 | 🟠 High 0.50–0.74 | 🟡 Medium 0.30–0.49 | 🟢 Low <0.30")
+    # Add severity legend and percentile (ASCII brackets for PDF compatibility)
+    report_lines.append("**Severity Legend:** [CRITICAL] ≥0.75 | [HIGH] 0.50–0.74 | [MEDIUM] 0.30–0.49 | [LOW] <0.30")
     report_lines.append("")
     report_lines.append(f"**{ticker} avg severity percentile vs. universe:** <placeholder percentile>")
     report_lines.append("")
@@ -717,10 +738,10 @@ def generate_markdown_report(
     report_lines.append("---")
     report_lines.append("")
     
-    # Top 10 Risks by Severity (Latest Year)
+    # Material Risks Section - NOW ORDERED BY NOVELTY
     report_lines.append(f"## Material Risk Factors — {latest_year}")
     report_lines.append("")
-    report_lines.append("The following represents the most severe risk disclosures requiring investor attention:")
+    report_lines.append("The following represents the most novel risk disclosures (ordered by novelty vs. prior years):")
     report_lines.append("")
     
     # Load provenance for evidence links
@@ -729,11 +750,25 @@ def generate_markdown_report(
     if base_sec_url == '<SEC_URL>':
         base_sec_url = f"https://www.sec.gov/Archives/edgar/data/{provenance['cik']}/{provenance['accession'].replace('-', '')}/{provenance['accession']}.htm"
     
+    # Filter risks by minimum quality threshold (from config.yaml)
+    # Only include risks with severity >= min_severity OR novelty >= min_novelty
+    filtered_risks = [
+        r for r in latest_result.risks
+        if r.get('severity', {}).get('value', 0) >= min_severity
+        or r.get('novelty', {}).get('value', 0) >= min_novelty
+    ]
+    
+    # Sort by NOVELTY (not severity) and take top 10
     sorted_risks = sorted(
-        latest_result.risks,
-        key=lambda r: r.get('severity', {}).get('value', 0),
+        filtered_risks,
+        key=lambda r: r.get('novelty', {}).get('value', 0),
         reverse=True
     )[:10]
+    
+    # Handle zero-risk case explicitly
+    if not sorted_risks:
+        report_lines.append("**No material risks detected.**")
+        report_lines.append("")
     
     for i, risk in enumerate(sorted_risks, 1):
         severity = risk.get('severity', {})
@@ -744,31 +779,25 @@ def generate_markdown_report(
         severity_val = severity.get('value', 0)
         novelty_val = novelty.get('value', 0)
         
-        # Determine risk label
+        # Determine risk label (ASCII for PDF compatibility)
         if severity_val >= 0.8:
-            risk_label = "🔴 CRITICAL"
+            risk_label = "[CRITICAL]"
         elif severity_val >= 0.7:
-            risk_label = "🟠 HIGH"
+            risk_label = "[HIGH]"
         elif severity_val >= 0.5:
-            risk_label = "🟡 MODERATE"
+            risk_label = "[MODERATE]"
         else:
-            risk_label = "🟢 LOW"
+            risk_label = "[LOW]"
         
-        # Determine status badge
+        # Determine status badge (ASCII)
         status_badge = ""
         if novelty_val >= 0.50:
-            status_badge = " ★ NEW"
-        
-        # Check if this risk was in previous years (dropped status)
-        for dropped in changes['disappeared_risks']:
+            status_badge = " [NEW]"
             dropped_text = dropped['risk']['text']
             similarity = calculate_risk_similarity(risk['text'], dropped_text)
             if similarity >= 0.4:
                 dropped_year = dropped['year']
-                status_badge = f" — DROPPED (previously disclosed in {dropped_year})"
-                break
-        
-        # Determine confidence level
+                status_badge = f" [DROPPED - previously disclosed in {dropped_year}]"
         if severity_val >= 0.80 and novelty_val >= 0.20:
             confidence = "High"
         elif (0.50 <= severity_val < 0.80) or (0.10 <= novelty_val <= 0.49):
@@ -779,8 +808,8 @@ def generate_markdown_report(
         # Count supporting quotes (default to 1 for the current quote)
         supporting_quotes = risk.get('metadata', {}).get('chunk_count', 1)
         
-        # Build evidence URL with anchor
-        evidence_url = f"{base_sec_url}#para{i}"
+        # REMOVED: Filing Reference URL (was generating incorrect #para anchors)
+        # To re-enable in the future, must map to actual paragraph ID from SEC HTML
         
         # Generate impact label from severity explanation
         severity_explanation = severity.get('explanation', 'material business impact')
@@ -854,8 +883,7 @@ def generate_markdown_report(
             report_lines.append(f"**Key Risk Factors:** {evidence_text}")
             report_lines.append("")
         
-        # Add filing citation
-        report_lines.append(f"**Filing Reference:** [View in 10-K]({evidence_url})")
+        # Note: Filing Reference URLs removed (were generating incorrect anchors)
         report_lines.append("")
         report_lines.append("---")
         report_lines.append("")
@@ -977,6 +1005,15 @@ def generate_markdown_report(
     report_lines.append("---")
     report_lines.append("")
     report_lines.append(f"*Analysis powered by SigmaK Risk Intelligence Platform | {datetime.now().strftime('%B %Y')}*")
+    report_lines.append("")
+    
+    # Add legal disclaimer
+    report_lines.append("---")
+    report_lines.append("")
+    report_lines.append("## Legal Disclaimer")
+    report_lines.append("")
+    report_lines.append("**USE AT YOUR OWN RISK.** This report is for informational purposes only and does not constitute investment advice, financial advice, trading advice, or any other sort of advice. We do not recommend that any investment decision be made based on this report. We cannot guarantee investment returns and you may lose money. Past performance is not indicative of future results.")
+    report_lines.append("")
     
     # Write to file
     output_path = Path(output_file)

@@ -38,5 +38,11 @@ severity:
   log_min_value: 6.0   # log10($1M)
   log_max_value: 12.0  # log10($1T)
 
+report_generation:
+  # Minimum thresholds for including risks in YOY reports
+  # Risks must meet at least one threshold to be included
+  min_severity_threshold: 0.3   # Minimum severity score (0.0-1.0)
+  min_novelty_threshold: 0.4    # Minimum novelty score (0.0-1.0)
+
 logging:
   level: "INFO"
