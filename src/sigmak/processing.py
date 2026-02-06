@@ -23,6 +23,17 @@ def is_boilerplate_intro(text: str) -> bool:
     text_lower = text.lower()
     word_count = len(text.split())
     
+    # Never filter chunks that contain substantive risk-related content
+    # (even if they also contain the Item 1A header)
+    substantive_keywords = [
+        "risk", "competition", "market", "revenue", "financial", "regulatory",
+        "operational", "customer", "supplier", "employee", "technology",
+        "cyber", "litigation", "compliance", "debt", "liquidity",
+        "inflation", "recession", "volatility", "disruption", "geopolitical"
+    ]
+    if any(keyword in text_lower for keyword in substantive_keywords):
+        return False
+    
     # Only filter very short chunks that are just section markers
     if word_count < 20 and re.search(r"item\s+1a", text_lower):
         return True
