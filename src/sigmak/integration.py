@@ -127,7 +127,7 @@ class IntegrationPipeline:
     - Scoring (severity + novelty)
     
     Usage:
-        >>> pipeline = IntegrationPipeline(persist_path="./chroma_db")
+        >>> pipeline = IntegrationPipeline(persist_path="./database")
         >>> result = pipeline.analyze_filing(
         ...     html_path="data/sample_10k.html",
         ...     ticker="AAPL",

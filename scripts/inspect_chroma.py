@@ -4,7 +4,7 @@
 Single-responsibility functions; CLI flags let you choose which collections
 to sample and whether to inspect the raw SQLite file.
 
-Usage: python scripts/inspect_chroma.py --dir chroma_db --max-sample 5
+Usage: python scripts/inspect_chroma.py --dir database --max-sample 5
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Inspect ChromaDB persistence directory")
-    parser.add_argument("--dir", default="chroma_db", help="Chroma persist directory")
+    parser.add_argument("--dir", default="database", help="Chroma persist directory")
     parser.add_argument("--collections", default=None, help="Comma-separated collection names to inspect (default: all)")
     parser.add_argument("--max-sample", type=int, default=5, help="Max sample rows per collection")
     parser.add_argument("--show-docs", action="store_true", help="Include document text samples in output")

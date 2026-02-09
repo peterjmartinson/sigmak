@@ -1151,7 +1151,7 @@ Examples:
     
     # Initialize pipeline
     pipeline = IntegrationPipeline(
-        persist_path="./chroma_db",
+        persist_path="./database",
         db_only_classification=db_only_classification,
         db_only_similarity_threshold=db_only_similarity_threshold
     )
