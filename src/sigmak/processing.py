@@ -7,21 +7,56 @@ import re
 
 def is_boilerplate_intro(text: str) -> bool:
     """
-    Detect if a chunk is the Item 1A title/intro boilerplate.
+    Detect if a chunk is the Item 1A title/intro boilerplate OR contains
+    table of contents markers or non-risk financial data.
     
     Returns True if the text contains:
     - "Item 1A" followed by "Risk Factors" (case-insensitive)
-    - Less than 50 words (intro text is typically short and generic)
-    - Contains phrases like "In this section", "described below", "following risks"
+    - "Table of Contents" markers
+    - Financial/operational data sections (Operating Earnings, Gross profit, etc.)
+    - Less than 50 words AND generic intro phrases
     
     Args:
         text: The chunk text to analyze
         
     Returns:
-        bool: True if this appears to be boilerplate intro, False otherwise
+        bool: True if this appears to be boilerplate/non-risk content, False otherwise
     """
     text_lower = text.lower()
     word_count = len(text.split())
+    
+    # Filter out chunks with "Table of Contents" markers - these are navigation, not content
+    if "table of contents" in text_lower:
+        return True
+    
+    # Filter out chunks that contain financial/operational section headers (not risk factors)
+    # These are section headers for financial discussion, not risk factor descriptions
+    # Be very specific to avoid filtering legitimate risk content
+    non_risk_sections = [
+        "operating earnings",
+        "gross profit margin",
+        "consolidated statement",
+        "balance sheet"
+    ]
+    
+    # Only filter if the chunk contains these phrases AND lacks risk-related context
+    # (e.g., a chunk about "Operating Earnings" is financial data, not a risk factor)
+    if any(phrase in text_lower for phrase in non_risk_sections):
+        # Double-check: if it also contains strong risk language, keep it
+        risk_verbs = [
+            "could adversely", "may adversely", "could negatively",
+            "may negatively", "could harm", "may harm", "could damage",
+            "may damage", "could impact", "may impact", "could affect",
+            "risk that", "risk of", "risks", "threatening"
+        ]
+        # If it has non-risk section headers but NO risk language, filter it
+        if not any(verb in text_lower for verb in risk_verbs):
+            return True
+    
+    # Filter chunks that are just page numbers or section references
+    # Example: "Item 1A. Risk Factors. 29"
+    if word_count < 15 and re.search(r"item\s+1a.*\d+\s*$", text_lower):
+        return True
     
     # Never filter chunks that contain substantive risk-related content
     # (even if they also contain the Item 1A header)
@@ -31,7 +66,8 @@ def is_boilerplate_intro(text: str) -> bool:
         "cyber", "litigation", "compliance", "debt", "liquidity",
         "inflation", "recession", "volatility", "disruption", "geopolitical"
     ]
-    if any(keyword in text_lower for keyword in substantive_keywords):
+    # Only check keywords for very short chunks (< 50 words)
+    if word_count < 50 and any(keyword in text_lower for keyword in substantive_keywords):
         return False
     
     # Only filter very short chunks that are just section markers

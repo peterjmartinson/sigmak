@@ -558,11 +558,14 @@ def get_company_name_with_fallback(db_path: str, ticker: str) -> str:
     # Second try: SEC API fallback
     # Import here to avoid circular dependencies and reduce load time
     try:
-        from sigmak.downloads.tenk_downloader import fetch_company_submissions
+        from sigmak.downloads.tenk_downloader import fetch_company_submissions, resolve_ticker_to_cik
         
-        submissions = fetch_company_submissions(ticker)
-        if submissions and "name" in submissions:
-            return submissions["name"]
+        # First resolve ticker to CIK (fetch_company_submissions expects CIK not ticker)
+        cik = resolve_ticker_to_cik(ticker)
+        if cik:
+            submissions = fetch_company_submissions(cik)
+            if submissions and "name" in submissions:
+                return submissions["name"]
     except Exception:
         # Suppress errors - if API call fails, just use ticker
         pass

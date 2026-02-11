@@ -57,7 +57,8 @@ def main(argv):
     ticker = args.ticker.upper()
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    svc = PeerDiscoveryService()
+    # Use the main database instead of creating a separate one
+    svc = PeerDiscoveryService(db_path="database/sec_filings.db")
     cik = svc.ticker_to_cik(ticker)
     logger.info("Target: %s => CIK %s", ticker, cik)
     if not cik:

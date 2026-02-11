@@ -122,6 +122,37 @@ class PeerDiscoveryService:
         sic = company_info.get("sic") or subs.get("sic")
         return str(sic) if sic is not None else None
 
+    def _extract_filing_metadata(self, subs: Dict) -> Dict[str, Optional[str]]:
+        """Extract filing metadata from submissions data."""
+        from datetime import datetime
+        
+        filings = subs.get("filings", {}).get("recent", {})
+        forms = filings.get("form", [])
+        filing_dates = filings.get("filingDate", [])
+        
+        # Calculate recent_filing_count
+        recent_filing_count = len(forms) if forms else None
+        
+        # Find latest filing date
+        latest_filing_date = max(filing_dates) if filing_dates else None
+        
+        # Find latest 10-K filing date
+        latest_10k_date = None
+        for i, form in enumerate(forms):
+            if form == "10-K" and i < len(filing_dates):
+                latest_10k_date = filing_dates[i]
+                break
+        
+        # Current timestamp for cache time
+        submissions_cached_at = datetime.utcnow().isoformat() + "Z"
+        
+        return {
+            "recent_filing_count": str(recent_filing_count) if recent_filing_count is not None else None,
+            "latest_filing_date": latest_filing_date,
+            "latest_10k_date": latest_10k_date,
+            "submissions_cached_at": submissions_cached_at,
+        }
+
     def find_peers_for_ticker(self, ticker: str, top_n: int = 10) -> List[str]:
         """Find peer tickers that share the same SIC code.
 
@@ -137,11 +168,30 @@ class PeerDiscoveryService:
         # Ensure target info is upserted into DB
         # Prefer cached company submissions when available to avoid live requests
         target_subs = self.get_company_submissions(cik, write_cache=True)
-        target_company_info = target_subs.get("companyInfo") or {}
-        target_sic = target_company_info.get("sic") or target_subs.get("sic")
+        target_sic = target_subs.get("sic")
         target_sic = str(target_sic) if target_sic is not None else None
+        # Extract filing metadata
+        filing_meta = self._extract_filing_metadata(target_subs)
         # Upsert target into DB
-        upsert_peer(self.db_path, ticker.upper(), cik, target_sic, target_company_info.get("title"))
+        upsert_peer(
+            self.db_path,
+            ticker.upper(),
+            cik,
+            target_sic,
+            name=target_subs.get("name"),
+            sic_description=target_subs.get("sicDescription"),
+            state_of_incorporation=target_subs.get("stateOfIncorporation"),
+            fiscal_year_end=target_subs.get("fiscalYearEnd"),
+            website=target_subs.get("website"),
+            phone=target_subs.get("phone"),
+            owner_org=target_subs.get("ownerOrg"),
+            entity_type=target_subs.get("entityType"),
+            category=target_subs.get("category"),
+            recent_filing_count=filing_meta.get("recent_filing_count"),
+            latest_filing_date=filing_meta.get("latest_filing_date"),
+            latest_10k_date=filing_meta.get("latest_10k_date"),
+            submissions_cached_at=filing_meta.get("submissions_cached_at")
+        )
         if not target_sic:
             return []
         # Query DB for existing peers with this SIC and return results.
@@ -171,11 +221,29 @@ class PeerDiscoveryService:
                 subs = self.get_company_submissions(other_cik, write_cache=True)
             except Exception:
                 subs = {}
-            company_info = subs.get("companyInfo") or {}
-            other_sic = company_info.get("sic") or subs.get("sic")
+            other_sic = subs.get("sic")
             other_sic = str(other_sic) if other_sic is not None else None
             if other_sic and other_sic == target_sic:
-                upsert_peer(self.db_path, t_up, other_cik, other_sic, company_info.get("title"))
+                filing_meta = self._extract_filing_metadata(subs)
+                upsert_peer(
+                    self.db_path,
+                    t_up,
+                    other_cik,
+                    other_sic,
+                    name=subs.get("name"),
+                    sic_description=subs.get("sicDescription"),
+                    state_of_incorporation=subs.get("stateOfIncorporation"),
+                    fiscal_year_end=subs.get("fiscalYearEnd"),
+                    website=subs.get("website"),
+                    phone=subs.get("phone"),
+                    owner_org=subs.get("ownerOrg"),
+                    entity_type=subs.get("entityType"),
+                    category=subs.get("category"),
+                    recent_filing_count=filing_meta.get("recent_filing_count"),
+                    latest_filing_date=filing_meta.get("latest_filing_date"),
+                    latest_10k_date=filing_meta.get("latest_10k_date"),
+                    submissions_cached_at=filing_meta.get("submissions_cached_at")
+                )
                 discovered.append(t_up)
                 if len(discovered) >= top_n:
                     break
@@ -220,10 +288,28 @@ class PeerDiscoveryService:
                 subs = self.get_company_submissions(other_cik, write_cache=False)
             except Exception:
                 subs = {}
-            company_info = subs.get("companyInfo") or {}
-            other_sic = company_info.get("sic") or subs.get("sic")
+            other_sic = subs.get("sic")
             other_sic = str(other_sic) if other_sic is not None else None
             if other_sic and other_sic == target_sic:
-                upsert_peer(self.db_path, t_up, other_cik, other_sic, company_info.get("title"))
+                filing_meta = self._extract_filing_metadata(subs)
+                upsert_peer(
+                    self.db_path,
+                    t_up,
+                    other_cik,
+                    other_sic,
+                    name=subs.get("name"),
+                    sic_description=subs.get("sicDescription"),
+                    state_of_incorporation=subs.get("stateOfIncorporation"),
+                    fiscal_year_end=subs.get("fiscalYearEnd"),
+                    website=subs.get("website"),
+                    phone=subs.get("phone"),
+                    owner_org=subs.get("ownerOrg"),
+                    entity_type=subs.get("entityType"),
+                    category=subs.get("category"),
+                    recent_filing_count=filing_meta.get("recent_filing_count"),
+                    latest_filing_date=filing_meta.get("latest_filing_date"),
+                    latest_10k_date=filing_meta.get("latest_10k_date"),
+                    submissions_cached_at=filing_meta.get("submissions_cached_at")
+                )
                 count += 1
         return count

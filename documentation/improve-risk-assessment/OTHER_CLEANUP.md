@@ -1,0 +1,1 @@
+1. sec_filings.peer database is getting populated as a side effect of scripts/demo_peer_discovery.py.  Instead, we should add something into src/sigmak/ that will update sec_filings.peers as much as possible but only for ONE ticker.  The demo_peer_discovery.py and other scripts that might update the peers table should call that new function in src/sigmak
