@@ -4,9 +4,11 @@
 import logging
 import re
 from pathlib import Path
+from typing import Optional, Tuple
 
 from bs4 import BeautifulSoup
 
+from sigmak.config import Config, EdgarConfig
 from sigmak.processing import chunk_risk_section
 
 # Setup basic logging
@@ -113,6 +115,170 @@ def slice_risk_factors(text: str) -> str:
 
     logger.info("Item 1A found but no end marker detected. Slicing from 1A to EOF.")
     return text[best_match.start() :].strip()
+
+def validate_risk_factors_text(text: str, config: EdgarConfig) -> bool:
+    """
+    Validate extracted risk factors text meets quality criteria.
+    
+    Checks:
+    - Word count within acceptable range
+    - Minimum sentence count
+    - Contains "risk" keyword if required
+    - Not a TOC entry pattern
+    
+    Args:
+        text: Extracted risk factors text
+        config: Edgar configuration with validation criteria
+        
+    Returns:
+        True if text passes all validation checks, False otherwise
+    """
+    if not text:
+        return False
+    
+    # Check for TOC-like patterns (e.g., "Item 1A. Risk Factors...14")
+    # TOC entries typically have dots leading to page numbers or very short content
+    toc_patterns = [
+        r'risk\s+factors[\s\.]+\d+$',  # "Risk Factors...14" or "RISK FACTORS 23"
+        r'item\s+1a[\s\.].*page\s+\d+',  # "Item 1A. Risk Factors Page 45"
+        r'\.{3,}',  # Multiple dots (leader dots in TOC)
+    ]
+    text_lower = text.lower()
+    for pattern in toc_patterns:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            logger.debug(f"Rejected: TOC pattern detected ({pattern})")
+            return False
+    
+    # Word count validation
+    words = text.split()
+    word_count = len(words)
+    
+    if word_count < config.validation.min_words:
+        logger.debug(f"Rejected: {word_count} words < minimum {config.validation.min_words}")
+        return False
+    
+    if word_count > config.validation.max_words:
+        logger.debug(f"Rejected: {word_count} words > maximum {config.validation.max_words}")
+        return False
+    
+    # Sentence count validation (simple heuristic: count periods, exclamation, question marks)
+    sentences = re.split(r'[.!?]+', text)
+    sentence_count = len([s for s in sentences if s.strip()])
+    
+    if sentence_count < config.validation.min_sentences:
+        logger.debug(f"Rejected: {sentence_count} sentences < minimum {config.validation.min_sentences}")
+        return False
+    
+    # Keyword validation
+    if config.validation.must_contain_risk:
+        if 'risk' not in text_lower:
+            logger.debug("Rejected: does not contain 'risk' keyword")
+            return False
+    
+    return True
+
+def extract_risk_factors_via_edgartools(
+    ticker: str, 
+    year: int, 
+    config: EdgarConfig
+) -> Optional[str]:
+    """
+    Extract Item 1A (Risk Factors) using edgartools library's DOM parser.
+    
+    This provides superior accuracy over regex-based extraction for many filings
+    by using the document's native structure/outline.
+    
+    Args:
+        ticker: Company ticker symbol (e.g., "AAPL")
+        year: Filing year
+        config: Edgar configuration with identity and validation settings
+        
+    Returns:
+        Extracted risk factors text if successful and valid, None otherwise
+    """
+    try:
+        # Import edgartools dynamically (optional dependency)
+        from edgar import Company, set_identity
+    except ImportError:
+        logger.info("edgartools not installed, skipping DOM-based extraction")
+        return None
+    
+    try:
+        # Set SEC-required identity for API compliance
+        set_identity(config.identity_email)
+        
+        # Fetch company and get latest 10-K filing for the year
+        company = Company(ticker)
+        filings = company.get_filings(form="10-K")
+        filing = filings.latest(year)
+        
+        if not filing:
+            logger.warning(f"No 10-K filing found for {ticker} in {year}")
+            return None
+        
+        # Extract 10-K object and get risk_factors property
+        tenk = filing.obj()
+        risk_text = tenk.risk_factors
+        
+        if not risk_text:
+            logger.warning(f"edgartools: No risk_factors property for {ticker} {year}")
+            return None
+        
+        # Validate the extracted content
+        if not validate_risk_factors_text(risk_text, config):
+            logger.warning(f"edgartools: Extracted text failed validation for {ticker} {year}")
+            return None
+        
+        logger.info(f"edgartools: Successfully extracted {len(risk_text)} chars for {ticker} {year}")
+        return risk_text
+        
+    except Exception as e:
+        logger.warning(f"edgartools extraction failed for {ticker} {year}: {e}")
+        return None
+
+def extract_risk_factors_with_fallback(
+    ticker: str,
+    year: int,
+    html_path: str,
+    config: Config
+) -> Tuple[str, str]:
+    """
+    Orchestrator: Extract Item 1A using edgartools first, fallback to regex-based extraction.
+    
+    Strategy:
+    1. If edgartools enabled and available, try DOM-based extraction
+    2. If that succeeds and validates, return result with method="edgartools"
+    3. Otherwise, fallback to existing slice_risk_factors() logic with method="fallback"
+    
+    Args:
+        ticker: Company ticker symbol
+        year: Filing year
+        html_path: Path to downloaded HTML file (for fallback)
+        config: Full application config (includes edgar settings)
+        
+    Returns:
+        Tuple of (extracted_text, extraction_method)
+        where method is either "edgartools" or "fallback"
+    """
+    # Try edgartools if enabled
+    if config.edgar.enabled:
+        logger.info(f"Attempting edgartools extraction for {ticker} {year}")
+        edgartools_result = extract_risk_factors_via_edgartools(ticker, year, config.edgar)
+        
+        if edgartools_result:
+            logger.info(f"Using edgartools extraction for {ticker} {year}")
+            return (edgartools_result, "edgartools")
+        
+        logger.info(f"edgartools extraction failed or unavailable, falling back to regex for {ticker} {year}")
+    else:
+        logger.info(f"edgartools disabled, using regex extraction for {ticker} {year}")
+    
+    # Fallback to regex-based extraction
+    full_text = extract_text_from_file(html_path)
+    risk_text = slice_risk_factors(full_text)
+    
+    logger.info(f"Using fallback extraction for {ticker} {year} ({len(risk_text)} chars)")
+    return (risk_text, "fallback")
 
 def run_ingestion_pipeline(html_content: str, ticker: str, year: int) -> str:
     """

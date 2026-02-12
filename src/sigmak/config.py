@@ -61,6 +61,25 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class EdgarValidationConfig:
+    """Edgar validation configuration."""
+
+    min_words: int
+    max_words: int
+    min_sentences: int
+    must_contain_risk: bool
+
+
+@dataclass(frozen=True)
+class EdgarConfig:
+    """Edgar (edgartools) integration configuration."""
+
+    enabled: bool
+    identity_email: str
+    validation: EdgarValidationConfig
+
+
+@dataclass(frozen=True)
 class Config:
     """Root configuration."""
 
@@ -69,6 +88,7 @@ class Config:
     llm: LLMConfig
     drift: DriftConfig
     logging: LoggingConfig
+    edgar: EdgarConfig
 
     # Backward-compatibility fields (env-only)
     redis_url: str
@@ -173,6 +193,33 @@ def load_config(path: Optional[Path] = None) -> Config:
         raise ValueError(f"Invalid log level: {log_level}")
     logging = LoggingConfig(level=log_level)
 
+    # Extract and validate edgar config
+    edgar_raw = raw.get("edgar", {})
+    if not isinstance(edgar_raw, dict):
+        raise ValueError("'edgar' must be a dictionary")
+    edgar_enabled = edgar_raw.get("enabled", True)
+    if not isinstance(edgar_enabled, bool):
+        raise ValueError("'edgar.enabled' must be a boolean")
+    edgar_email = edgar_raw.get("identity_email", "")
+    if not isinstance(edgar_email, str):
+        raise ValueError("'edgar.identity_email' must be a string")
+    
+    # Extract validation sub-config
+    validation_raw = edgar_raw.get("validation", {})
+    if not isinstance(validation_raw, dict):
+        raise ValueError("'edgar.validation' must be a dictionary")
+    validation = EdgarValidationConfig(
+        min_words=validation_raw.get("min_words", 200),
+        max_words=validation_raw.get("max_words", 50000),
+        min_sentences=validation_raw.get("min_sentences", 5),
+        must_contain_risk=validation_raw.get("must_contain_risk", True),
+    )
+    edgar = EdgarConfig(
+        enabled=edgar_enabled,
+        identity_email=edgar_email,
+        validation=validation,
+    )
+
     # Backward-compatibility env vars
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
     environment = os.environ.get("ENVIRONMENT", "development")
@@ -183,6 +230,7 @@ def load_config(path: Optional[Path] = None) -> Config:
         llm=llm,
         drift=drift,
         logging=logging,
+        edgar=edgar,
         redis_url=redis_url,
         environment=environment,
     )

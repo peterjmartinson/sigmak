@@ -43,6 +43,9 @@ pdf = [
     "markdown>=3.5.0",
     "jinja2>=3.1.0",
 ]
+edgar = [
+    "edgartools>=2.0.0",
+]
 
 [dependency-groups]
 dev = [
@@ -73,6 +76,7 @@ module = [
     "langchain_text_splitters.*",
     "lxml.*",
     "google.genai.*",
-    "vaderSentiment.*"
+    "vaderSentiment.*",
+    "edgar.*"
 ]
 ignore_missing_imports = true
