@@ -13,12 +13,12 @@ llm:
   model: "gemini-2.5-flash"
   temperature: 0.0
 
-edgar:
-  # edgartools integration for Item 1A extraction
+dom_extractor:
+  # DOM-based extraction for Item 1A (sec-parser or regex fallback)
   enabled: true
-  identity_email: "peter.j.martinson@gmail.com"  # Required by SEC for API compliance
+  method: "sec-parser"  # "sec-parser" or "regex"
   
-  # Validation criteria for edgartools extraction results
+  # Validation criteria for extracted risk factors text
   validation:
     min_words: 200          # Minimum word count
     max_words: 50000        # Maximum word count (catch full-document errors)

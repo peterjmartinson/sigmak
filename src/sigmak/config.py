@@ -61,8 +61,8 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
-class EdgarValidationConfig:
-    """Edgar validation configuration."""
+class DomExtractorValidationConfig:
+    """DOM extractor validation configuration."""
 
     min_words: int
     max_words: int
@@ -71,12 +71,12 @@ class EdgarValidationConfig:
 
 
 @dataclass(frozen=True)
-class EdgarConfig:
-    """Edgar (edgartools) integration configuration."""
+class DomExtractorConfig:
+    """DOM-based extraction configuration (sec-parser, regex fallback)."""
 
     enabled: bool
-    identity_email: str
-    validation: EdgarValidationConfig
+    method: str
+    validation: DomExtractorValidationConfig
 
 
 @dataclass(frozen=True)
@@ -88,7 +88,7 @@ class Config:
     llm: LLMConfig
     drift: DriftConfig
     logging: LoggingConfig
-    edgar: EdgarConfig
+    dom_extractor: DomExtractorConfig
 
     # Backward-compatibility fields (env-only)
     redis_url: str
@@ -193,30 +193,30 @@ def load_config(path: Optional[Path] = None) -> Config:
         raise ValueError(f"Invalid log level: {log_level}")
     logging = LoggingConfig(level=log_level)
 
-    # Extract and validate edgar config
-    edgar_raw = raw.get("edgar", {})
-    if not isinstance(edgar_raw, dict):
-        raise ValueError("'edgar' must be a dictionary")
-    edgar_enabled = edgar_raw.get("enabled", True)
-    if not isinstance(edgar_enabled, bool):
-        raise ValueError("'edgar.enabled' must be a boolean")
-    edgar_email = edgar_raw.get("identity_email", "")
-    if not isinstance(edgar_email, str):
-        raise ValueError("'edgar.identity_email' must be a string")
+    # Extract and validate dom_extractor config
+    dom_extractor_raw = raw.get("dom_extractor", {})
+    if not isinstance(dom_extractor_raw, dict):
+        raise ValueError("'dom_extractor' must be a dictionary")
+    dom_enabled = dom_extractor_raw.get("enabled", True)
+    if not isinstance(dom_enabled, bool):
+        raise ValueError("'dom_extractor.enabled' must be a boolean")
+    dom_method = dom_extractor_raw.get("method", "sec-parser")
+    if not isinstance(dom_method, str):
+        raise ValueError("'dom_extractor.method' must be a string")
     
     # Extract validation sub-config
-    validation_raw = edgar_raw.get("validation", {})
+    validation_raw = dom_extractor_raw.get("validation", {})
     if not isinstance(validation_raw, dict):
-        raise ValueError("'edgar.validation' must be a dictionary")
-    validation = EdgarValidationConfig(
+        raise ValueError("'dom_extractor.validation' must be a dictionary")
+    validation = DomExtractorValidationConfig(
         min_words=validation_raw.get("min_words", 200),
         max_words=validation_raw.get("max_words", 50000),
         min_sentences=validation_raw.get("min_sentences", 5),
         must_contain_risk=validation_raw.get("must_contain_risk", True),
     )
-    edgar = EdgarConfig(
-        enabled=edgar_enabled,
-        identity_email=edgar_email,
+    dom_extractor = DomExtractorConfig(
+        enabled=dom_enabled,
+        method=dom_method,
         validation=validation,
     )
 
@@ -230,7 +230,7 @@ def load_config(path: Optional[Path] = None) -> Config:
         llm=llm,
         drift=drift,
         logging=logging,
-        edgar=edgar,
+        dom_extractor=dom_extractor,
         redis_url=redis_url,
         environment=environment,
     )

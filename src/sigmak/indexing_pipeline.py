@@ -52,7 +52,7 @@ class IndexingPipeline:
         """
         self.persist_path = persist_path
         
-        # Load application config (includes edgartools settings)
+        # Load application config (includes dom_extractor settings)
         self.config = get_settings()
         
         # Initialize Chroma DB
@@ -71,7 +71,7 @@ class IndexingPipeline:
             f"persist_path={persist_path}, model={embedding_model}"
         )
         logger.info(
-            f"edgartools extraction: {'enabled' if self.config.edgar.enabled else 'disabled'}"
+            f"DOM extraction: {'enabled' if self.config.dom_extractor.enabled else 'disabled'}"
         )
 
     @property
@@ -142,8 +142,8 @@ class IndexingPipeline:
         try:
             start_time = time.time()
             
-            # Step 1 & 2: Extract Item 1A using edgartools (with fallback to regex)
-            logger.info(f"Extracting {item_type} (edgartools {'enabled' if self.config.edgar.enabled else 'disabled'})...")
+            # Step 1 & 2: Extract Item 1A using sec-parser (with fallback to regex)
+            logger.info(f"Extracting {item_type} (sec-parser {'enabled' if self.config.dom_extractor.enabled else 'disabled'})...")
             risk_text, extraction_method = extract_risk_factors_with_fallback(
                 ticker=ticker,
                 year=filing_year,

@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 
 from bs4 import BeautifulSoup
 
-from sigmak.config import Config, EdgarConfig
+from sigmak.config import Config, DomExtractorConfig
 from sigmak.processing import chunk_risk_section
 
 # Setup basic logging
@@ -116,7 +116,7 @@ def slice_risk_factors(text: str) -> str:
     logger.info("Item 1A found but no end marker detected. Slicing from 1A to EOF.")
     return text[best_match.start() :].strip()
 
-def validate_risk_factors_text(text: str, config: EdgarConfig) -> bool:
+def validate_risk_factors_text(text: str, config: DomExtractorConfig) -> bool:
     """
     Validate extracted risk factors text meets quality criteria.
     
@@ -128,7 +128,7 @@ def validate_risk_factors_text(text: str, config: EdgarConfig) -> bool:
     
     Args:
         text: Extracted risk factors text
-        config: Edgar configuration with validation criteria
+        config: DOM extractor configuration with validation criteria
         
     Returns:
         True if text passes all validation checks, False otherwise
@@ -177,63 +177,84 @@ def validate_risk_factors_text(text: str, config: EdgarConfig) -> bool:
     
     return True
 
-def extract_risk_factors_via_edgartools(
-    ticker: str, 
-    year: int, 
-    config: EdgarConfig
+def extract_risk_factors_via_secparser(
+    html_path: str,
+    config: DomExtractorConfig
 ) -> Optional[str]:
     """
-    Extract Item 1A (Risk Factors) using edgartools library's DOM parser.
+    Extract Item 1A (Risk Factors) using sec-parser's DOM parser.
     
-    This provides superior accuracy over regex-based extraction for many filings
-    by using the document's native structure/outline.
+    This provides superior accuracy over regex-based extraction by using
+    the document's native semantic structure.
     
     Args:
-        ticker: Company ticker symbol (e.g., "AAPL")
-        year: Filing year
-        config: Edgar configuration with identity and validation settings
+        html_path: Path to local HTML file
+        config: DOM extractor configuration with validation settings
         
     Returns:
         Extracted risk factors text if successful and valid, None otherwise
     """
     try:
-        # Import edgartools dynamically (optional dependency)
-        from edgar import Company, set_identity
+        # Import sec-parser dynamically (optional dependency)
+        import sec_parser as sp
     except ImportError:
-        logger.info("edgartools not installed, skipping DOM-based extraction")
+        logger.error(
+            "sec-parser not installed — falling back to regex. "
+            "To enable sec-parser run: uv add sec-parser"
+        )
         return None
     
     try:
-        # Set SEC-required identity for API compliance
-        set_identity(config.identity_email)
+        # Read HTML file with encoding fallbacks
+        path = Path(html_path)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+        except UnicodeDecodeError:
+            logger.warning(f"UTF-8 decode failed for {html_path}. Falling back to CP1252.")
+            with open(path, 'r', encoding='cp1252') as f:
+                html_content = f.read()
         
-        # Fetch company and get latest 10-K filing for the year
-        company = Company(ticker)
-        filings = company.get_filings(form="10-K")
-        filing = filings.latest(year)
+        # Parse with sec-parser (Edgar10QParser can handle 10-K files too)
+        elements = sp.Edgar10QParser().parse(html_content)
         
-        if not filing:
-            logger.warning(f"No 10-K filing found for {ticker} in {year}")
+        # Find Item 1A section
+        risk_parts = []
+        in_risk_section = False
+        
+        for element in elements:
+            element_text = element.text.strip()
+            
+            # Check if this is the start of Item 1A
+            if re.search(r"ITEM\s+1A[\.\s\-:]+RISK\s+FACTORS", element_text, re.IGNORECASE):
+                in_risk_section = True
+                risk_parts.append(element_text)
+                continue
+            
+            # Check if we've reached the next section (Item 1B or Item 2)
+            if in_risk_section and re.search(r"ITEM\s+(1B|2)[\.\s\-:]", element_text, re.IGNORECASE):
+                break
+            
+            # Collect text while in risk section
+            if in_risk_section:
+                risk_parts.append(element_text)
+        
+        if not risk_parts:
+            logger.warning("sec-parser: No Item 1A section found")
             return None
         
-        # Extract 10-K object and get risk_factors property
-        tenk = filing.obj()
-        risk_text = tenk.risk_factors
-        
-        if not risk_text:
-            logger.warning(f"edgartools: No risk_factors property for {ticker} {year}")
-            return None
+        risk_text = "\n".join(risk_parts)
         
         # Validate the extracted content
         if not validate_risk_factors_text(risk_text, config):
-            logger.warning(f"edgartools: Extracted text failed validation for {ticker} {year}")
+            logger.warning("sec-parser: Extracted text failed validation")
             return None
         
-        logger.info(f"edgartools: Successfully extracted {len(risk_text)} chars for {ticker} {year}")
+        logger.info(f"sec-parser:success - Extracted {len(risk_text)} chars")
         return risk_text
         
     except Exception as e:
-        logger.warning(f"edgartools extraction failed for {ticker} {year}: {e}")
+        logger.warning(f"sec-parser:error - {e}")
         return None
 
 def extract_risk_factors_with_fallback(
@@ -243,42 +264,42 @@ def extract_risk_factors_with_fallback(
     config: Config
 ) -> Tuple[str, str]:
     """
-    Orchestrator: Extract Item 1A using edgartools first, fallback to regex-based extraction.
+    Orchestrator: Extract Item 1A using sec-parser first, fallback to regex-based extraction.
     
     Strategy:
-    1. If edgartools enabled and available, try DOM-based extraction
-    2. If that succeeds and validates, return result with method="edgartools"
-    3. Otherwise, fallback to existing slice_risk_factors() logic with method="fallback"
+    1. If dom_extractor enabled and method="sec-parser", try DOM-based extraction
+    2. If that succeeds and validates, return result with method="sec-parser"
+    3. Otherwise, fallback to existing slice_risk_factors() logic with method="regex"
     
     Args:
         ticker: Company ticker symbol
         year: Filing year
         html_path: Path to downloaded HTML file (for fallback)
-        config: Full application config (includes edgar settings)
+        config: Full application config (includes dom_extractor settings)
         
     Returns:
         Tuple of (extracted_text, extraction_method)
-        where method is either "edgartools" or "fallback"
+        where method is either "sec-parser" or "regex"
     """
-    # Try edgartools if enabled
-    if config.edgar.enabled:
-        logger.info(f"Attempting edgartools extraction for {ticker} {year}")
-        edgartools_result = extract_risk_factors_via_edgartools(ticker, year, config.edgar)
+    # Try sec-parser if enabled
+    if config.dom_extractor.enabled and config.dom_extractor.method == "sec-parser":
+        logger.info(f"Attempting sec-parser extraction for {ticker} {year}")
+        secparser_result = extract_risk_factors_via_secparser(html_path, config.dom_extractor)
         
-        if edgartools_result:
-            logger.info(f"Using edgartools extraction for {ticker} {year}")
-            return (edgartools_result, "edgartools")
+        if secparser_result:
+            logger.info(f"sec-parser:success for {ticker} {year}")
+            return (secparser_result, "sec-parser")
         
-        logger.info(f"edgartools extraction failed or unavailable, falling back to regex for {ticker} {year}")
+        logger.info(f"sec-parser failed, falling back to regex for {ticker} {year}")
     else:
-        logger.info(f"edgartools disabled, using regex extraction for {ticker} {year}")
+        logger.info(f"sec-parser disabled, using regex extraction for {ticker} {year}")
     
     # Fallback to regex-based extraction
     full_text = extract_text_from_file(html_path)
     risk_text = slice_risk_factors(full_text)
     
-    logger.info(f"Using fallback extraction for {ticker} {year} ({len(risk_text)} chars)")
-    return (risk_text, "fallback")
+    logger.info(f"fallback:regex for {ticker} {year} ({len(risk_text)} chars)")
+    return (risk_text, "regex")
 
 def run_ingestion_pipeline(html_content: str, ticker: str, year: int) -> str:
     """

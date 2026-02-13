@@ -114,17 +114,17 @@ def test_validate_risk_factors_text_min_words() -> None:
     Verify validation rejects content with fewer than minimum words (default 200).
     """
     from sigmak.ingest import validate_risk_factors_text
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
@@ -139,17 +139,17 @@ def test_validate_risk_factors_text_max_words() -> None:
     Verify validation rejects content exceeding maximum words (default 50,000).
     """
     from sigmak.ingest import validate_risk_factors_text
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
@@ -164,17 +164,17 @@ def test_validate_risk_factors_text_must_contain_risk() -> None:
     Verify validation rejects content without the word 'risk' when required.
     """
     from sigmak.ingest import validate_risk_factors_text
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
@@ -189,17 +189,17 @@ def test_validate_risk_factors_text_toc_pattern() -> None:
     Verify validation rejects TOC-like entries (e.g., 'Risk Factors...14').
     """
     from sigmak.ingest import validate_risk_factors_text
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
@@ -218,17 +218,17 @@ def test_validate_risk_factors_text_min_sentences() -> None:
     Verify validation rejects content with fewer than minimum sentences (default 5).
     """
     from sigmak.ingest import validate_risk_factors_text
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
@@ -243,17 +243,17 @@ def test_validate_risk_factors_text_valid_content() -> None:
     Verify validation accepts valid Item 1A risk factor text.
     """
     from sigmak.ingest import validate_risk_factors_text
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
@@ -273,164 +273,191 @@ def test_validate_risk_factors_text_valid_content() -> None:
     assert validate_risk_factors_text(valid_text, config)
 
 
-def test_extract_risk_factors_via_edgartools_success() -> None:
+def test_extract_risk_factors_via_secparser_success(tmp_path) -> None:
     """
-    Verify edgartools extraction succeeds when properly configured and API responds.
+    Verify sec-parser extraction succeeds with valid HTML file.
     """
-    from sigmak.ingest import extract_risk_factors_via_edgartools
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.ingest import extract_risk_factors_via_secparser
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
-    # Mock the edgartools library
-    mock_risk_text = """
-    Investing in our securities involves substantial risks. Our business faces 
-    challenges from market competition. Supply chain disruptions may harm operations.
-    Regulatory changes could increase compliance costs. Economic downturns affect demand.
-    Technology failures pose operational risks. International expansion carries risks.
-    Currency fluctuations impact financial results. Cybersecurity threats are ongoing.
-    Legal proceedings may result in significant costs. Climate change poses long-term risks.
-    """ + (" Additional detailed risk factors and considerations. " * 50)
+    # Create mock HTML file with Item 1A section
+    html_file = tmp_path / "test_10k.html"
+    # Create substantial content that will pass validation (>200 words, >5 sentences, contains "risk")
+    risk_content = """
+    Investing in our securities involves substantial risks that could materially harm our business.
+    Our business faces significant challenges from intense market competition in all regions.
+    Supply chain disruptions may adversely harm our operations and financial results.
+    Regulatory changes could substantially increase our compliance costs and operational burden.
+    Economic downturns significantly affect customer demand for our products and services.
+    Technology infrastructure failures pose critical operational risks to our systems.
+    International expansion efforts carry inherent risks and substantial uncertainties.
+    Currency exchange rate fluctuations materially impact our reported financial results.
+    Cybersecurity threats require ongoing investment, vigilance, and proactive management.
+    Legal proceedings may result in significant financial costs and reputational damage.
+    Climate change poses long-term risks to our business operations and supply chain.
+    Market volatility creates uncertainty in our revenue forecasting and planning processes.
+    """
+    additional_risks = risk_content * 5  # Repeat to ensure >200 words
     
-    mock_tenk = MagicMock()
-    mock_tenk.risk_factors = mock_risk_text
+    html_content = f"""
+    <html>
+        <body>
+            <div>ITEM 1. BUSINESS</div>
+            <div>Business description here.</div>
+            <div>ITEM 1A. RISK FACTORS</div>
+            <div>{additional_risks}</div>
+            <div>ITEM 1B. UNRESOLVED STAFF COMMENTS</div>
+        </body>
+    </html>
+    """
+    html_file.write_text(html_content)
     
-    mock_filing = MagicMock()
-    mock_filing.obj.return_value = mock_tenk
-    
-    mock_filings = MagicMock()
-    mock_filings.latest.return_value = mock_filing
-    
-    mock_company = MagicMock()
-    mock_company.get_filings.return_value = mock_filings
-    
-    # Patch edgartools imports and function calls
-    with patch("edgar.Company", return_value=mock_company):
-        with patch("edgar.set_identity") as mock_set_identity:
-            result = extract_risk_factors_via_edgartools("AAPL", 2024, config)
+    result = extract_risk_factors_via_secparser(str(html_file), config)
     
     assert result is not None
     assert "risks" in result.lower()
     assert len(result.split()) > 200
-    mock_set_identity.assert_called_once_with(config.identity_email)
+    assert "ITEM 1B" not in result
 
 
-def test_extract_risk_factors_via_edgartools_not_installed() -> None:
+def test_extract_risk_factors_via_secparser_not_installed() -> None:
     """
-    Verify graceful handling when edgartools is not installed.
+    Verify graceful handling when sec-parser is not installed.
     """
-    from sigmak.ingest import extract_risk_factors_via_edgartools
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.ingest import extract_risk_factors_via_secparser
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
+    import sys
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
-    # Simulate ImportError for edgartools
-    with patch("edgar.Company", side_effect=ImportError("No module named 'edgar'")):
-        result = extract_risk_factors_via_edgartools("AAPL", 2024, config)
-    
-    assert result is None
+    # Temporarily remove sec_parser from sys.modules to simulate not installed
+    sec_parser_backup = sys.modules.get('sec_parser')
+    try:
+        if 'sec_parser' in sys.modules:
+            del sys.modules['sec_parser']
+        
+        # Mock __import__ to raise ImportError for sec_parser only
+        import builtins
+        original_import = builtins.__import__
+        def mock_import(name, *args, **kwargs):
+            if name == 'sec_parser' or name.startswith('sec_parser.'):
+                raise ImportError(f"No module named '{name}'")
+            return original_import(name, *args, **kwargs)
+        
+        with patch('builtins.__import__', side_effect=mock_import):
+            result = extract_risk_factors_via_secparser("/fake/path.html", config)
+        
+        assert result is None
+    finally:
+        # Restore sec_parser in sys.modules if it was there before
+        if sec_parser_backup is not None:
+            sys.modules['sec_parser'] = sec_parser_backup
 
 
-def test_extract_risk_factors_via_edgartools_api_error() -> None:
+def test_extract_risk_factors_via_secparser_parsing_error(tmp_path) -> None:
     """
-    Verify graceful handling when edgartools API fails.
+    Verify graceful handling when sec-parser encounters parsing errors.
     """
-    from sigmak.ingest import extract_risk_factors_via_edgartools
-    from sigmak.config import EdgarConfig, EdgarValidationConfig
+    from sigmak.ingest import extract_risk_factors_via_secparser
+    from sigmak.config import DomExtractorConfig, DomExtractorValidationConfig
     
-    validation = EdgarValidationConfig(
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    config = EdgarConfig(
+    config = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     
-    # Mock API failure
-    mock_company = MagicMock()
-    mock_company.get_filings.side_effect = Exception("SEC API error")
+    # Create HTML file with no Item 1A section
+    html_file = tmp_path / "bad_10k.html"
+    html_file.write_text("<html><body>Invalid content without Item 1A</body></html>")
     
-    with patch("edgar.Company", return_value=mock_company):
-        with patch("edgar.set_identity"):
-            result = extract_risk_factors_via_edgartools("AAPL", 2024, config)
+    result = extract_risk_factors_via_secparser(str(html_file), config)
     
     assert result is None
 
 
-def test_extract_risk_factors_with_fallback_prefers_edgartools(tmp_path) -> None:
+def test_extract_risk_factors_with_fallback_prefers_secparser(tmp_path) -> None:
     """
-    Verify orchestrator tries edgartools first when enabled and available.
+    Verify orchestrator tries sec-parser first when enabled and available.
     """
     from sigmak.ingest import extract_risk_factors_with_fallback
-    from sigmak.config import Config, EdgarConfig, EdgarValidationConfig, LoggingConfig, DatabaseConfig, ChromaConfig, LLMConfig, DriftConfig
+    from sigmak.config import Config, DomExtractorConfig, DomExtractorValidationConfig, LoggingConfig, DatabaseConfig, ChromaConfig, LLMConfig, DriftConfig
     from pathlib import Path
     
-    # Create mock HTML file for fallback
+    # Create HTML file with Item 1A content
     html_file = tmp_path / "test_10k.html"
-    html_file.write_text("""
+    # Create more realistic HTML that sec-parser can properly extract
+    html_content = """
         <html><body>
-        ITEM 1A. RISK FACTORS
-        Fallback risk text from HTML file parsing.
-        This is what we get from the regex-based extraction.
-        ITEM 1B. UNRESOLVED STAFF COMMENTS
+        <div>ITEM 1. BUSINESS</div>
+        <p>Business content goes here with details about operations.</p>
+        
+        <div>ITEM 1A. RISK FACTORS</div>
+        <p>Our business faces substantial risks that could materially affect our operations.
+        Market competition poses significant challenges to our market share and pricing.</p>
+        <p>Supply chain disruptions and shortages may materially harm our operations and ability to deliver.
+        Regulatory changes in multiple jurisdictions could significantly increase our compliance costs.</p>
+        <p>Economic downturns and recessions affect customer demand and purchasing patterns.
+        Technology infrastructure failures pose serious operational risks to our systems and data.</p>
+        <p>Currency exchange rate fluctuations materially impact our international financial results.
+        Cybersecurity threats and data breaches require ongoing investment and vigilance.</p>
+        <p>Legal proceedings and litigation can be costly and time-consuming for our organization.
+        Climate change and environmental regulations may affect our long-term business model.</p>
+        <p>Geopolitical tensions and trade disputes create uncertainty in our global operations.
+        Labor shortages and workforce challenges impact our ability to scale operations.</p>
+        <p>Interest rate changes affect our borrowing costs and capital structure decisions.
+        Product liability claims could result in significant financial losses and reputational damage.</p>
+        <p>Intellectual property disputes may require substantial legal resources to defend.
+        Changes in consumer preferences could reduce demand for our products and services.</p>
+        <p>Pandemic or health crisis events may disrupt operations and supply chains globally.
+        Insurance coverage may not be adequate to cover all potential losses and liabilities.</p>
+        <p>Raw material price volatility affects our production costs and profit margins.
+        Dependence on key suppliers creates concentration risk in our supply chain.</p>
+        
+        <div>ITEM 1B. UNRESOLVED STAFF COMMENTS</div>
+        <p>We have no unresolved comments from the SEC staff.</p>
         </body></html>
-    """)
+    """
+    html_file.write_text(html_content)
     
-    # Create mock edgartools response (valid)
-    mock_risk_text = """
-    Edgartools extracted risk factors. Our business faces substantial risks.
-    Market competition poses challenges. Supply chain issues may harm operations.
-    Regulatory changes could increase costs. Economic downturns affect demand.
-    Technology failures pose operational risks. Currency fluctuations impact results.
-    Cybersecurity threats are ongoing. Legal proceedings cost money. Climate risks exist.
-    """ + (" More risk details from edgartools API. " * 50)
-    
-    mock_tenk = MagicMock()
-    mock_tenk.risk_factors = mock_risk_text
-    
-    mock_filing = MagicMock()
-    mock_filing.obj.return_value = mock_tenk
-    
-    mock_filings = MagicMock()
-    mock_filings.latest.return_value = mock_filing
-    
-    mock_company = MagicMock()
-    mock_company.get_filings.return_value = mock_filings
-    
-    # Create settings with edgartools enabled
-    validation = EdgarValidationConfig(
+    # Create settings with dom_extractor enabled
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    edgar = EdgarConfig(
+    dom_extractor = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     config = Config(
@@ -439,34 +466,32 @@ def test_extract_risk_factors_with_fallback_prefers_edgartools(tmp_path) -> None
         llm=LLMConfig(model="test", temperature=0.0),
         drift=DriftConfig(review_cron="0 3 * * *", sample_size=100, low_confidence_threshold=0.6, drift_threshold=0.2),
         logging=LoggingConfig(level="INFO"),
-        edgar=edgar,
+        dom_extractor=dom_extractor,
         redis_url="redis://localhost",
         environment="test"
     )
     
-    with patch("edgar.Company", return_value=mock_company):
-        with patch("edgar.set_identity"):
-            text, method = extract_risk_factors_with_fallback("AAPL", 2024, str(html_file), config)
+    text, method = extract_risk_factors_with_fallback("AAPL", 2024, str(html_file), config)
     
-    assert method == "edgartools"
-    assert "edgartools" in text.lower()
-    assert "fallback" not in text.lower()
+    assert method == "sec-parser"
+    assert "sec-parser" in text.lower() or "risk" in text.lower()
+    assert len(text.split()) > 200
 
 
-def test_extract_risk_factors_with_fallback_uses_fallback(tmp_path) -> None:
+def test_extract_risk_factors_with_fallback_uses_regex(tmp_path) -> None:
     """
-    Verify orchestrator falls back to regex extraction when edgartools fails.
+    Verify orchestrator falls back to regex extraction when sec-parser fails.
     """
     from sigmak.ingest import extract_risk_factors_with_fallback
-    from sigmak.config import Config, EdgarConfig, EdgarValidationConfig, LoggingConfig, DatabaseConfig, ChromaConfig, LLMConfig, DriftConfig
+    from sigmak.config import Config, DomExtractorConfig, DomExtractorValidationConfig, LoggingConfig, DatabaseConfig, ChromaConfig, LLMConfig, DriftConfig
     from pathlib import Path
     
-    # Create HTML file for fallback
+    # Create HTML file for regex fallback
     html_file = tmp_path / "test_10k.html"
     html_file.write_text("""
         <html><body>
         ITEM 1A. RISK FACTORS
-        Fallback risk extraction works correctly. Our business operations involve risks.
+        Regex fallback extraction works correctly. Our business operations involve risks.
         We face significant market challenges and competitive pressures daily.
         Supply chain disruptions could materially harm our business operations.
         Regulatory compliance costs continue to increase over time significantly.
@@ -480,16 +505,16 @@ def test_extract_risk_factors_with_fallback_uses_fallback(tmp_path) -> None:
         </body></html>
     """)
     
-    # Create settings with edgartools enabled but mock it to fail
-    validation = EdgarValidationConfig(
+    # Create settings with dom_extractor enabled
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    edgar = EdgarConfig(
+    dom_extractor = DomExtractorConfig(
         enabled=True,
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     config = Config(
@@ -498,34 +523,53 @@ def test_extract_risk_factors_with_fallback_uses_fallback(tmp_path) -> None:
         llm=LLMConfig(model="test", temperature=0.0),
         drift=DriftConfig(review_cron="0 3 * * *", sample_size=100, low_confidence_threshold=0.6, drift_threshold=0.2),
         logging=LoggingConfig(level="INFO"),
-        edgar=edgar,
+        dom_extractor=dom_extractor,
         redis_url="redis://localhost",
         environment="test"
     )
     
-    # Mock edgartools to fail
-    with patch("edgar.Company", side_effect=ImportError("No edgartools")):
-        text, method = extract_risk_factors_with_fallback("AAPL", 2024, str(html_file), config)
+    # Mock sec-parser to fail by raising ImportError
+    # This will cause it to fall back to regex
+    import builtins
+    import sys
     
-    assert method == "fallback"
-    assert "fallback" in text.lower()
+    sec_parser_backup = sys.modules.get('sec_parser')
+    original_import = builtins.__import__
+    
+    def mock_import(name, *args, **kwargs):
+        if name == 'sec_parser' or name.startswith('sec_parser.'):
+            raise ImportError(f"No module named '{name}'")
+        return original_import(name, *args, **kwargs)
+    
+    try:
+        if 'sec_parser' in sys.modules:
+            del sys.modules['sec_parser']
+        
+        builtins.__import__ = mock_import
+        text, method = extract_risk_factors_with_fallback("AAPL", 2024, str(html_file), config)
+    finally:
+        builtins.__import__ = original_import
+        if sec_parser_backup is not None:
+            sys.modules['sec_parser'] = sec_parser_backup
+    
+    assert method == "regex"
     assert "business operations involve risks" in text.lower()
 
 
 def test_extract_risk_factors_with_fallback_disabled(tmp_path) -> None:
     """
-    Verify orchestrator skips edgartools when disabled in config.
+    Verify orchestrator skips sec-parser when disabled in config.
     """
     from sigmak.ingest import extract_risk_factors_with_fallback
-    from sigmak.config import Config, EdgarConfig, EdgarValidationConfig, LoggingConfig, DatabaseConfig, ChromaConfig, LLMConfig, DriftConfig
+    from sigmak.config import Config, DomExtractorConfig, DomExtractorValidationConfig, LoggingConfig, DatabaseConfig, ChromaConfig, LLMConfig, DriftConfig
     from pathlib import Path
     
-    # Create HTML file for fallback
+    # Create HTML file for regex extraction
     html_file = tmp_path / "test_10k.html"
     html_file.write_text("""
         <html><body>
         ITEM 1A. RISK FACTORS
-        Risk factors extracted via fallback mechanism when edgartools disabled.
+        Risk factors extracted via regex mechanism when dom_extractor disabled.
         Our company faces various business and operational risks continuously.
         Market conditions may adversely affect our financial performance metrics.
         Competitive pressures require ongoing strategic responses and investments.
@@ -540,16 +584,16 @@ def test_extract_risk_factors_with_fallback_disabled(tmp_path) -> None:
         </body></html>
     """)
     
-    # Create settings with edgartools DISABLED
-    validation = EdgarValidationConfig(
+    # Create settings with dom_extractor DISABLED
+    validation = DomExtractorValidationConfig(
         min_words=200,
         max_words=50000,
         min_sentences=5,
         must_contain_risk=True
     )
-    edgar = EdgarConfig(
+    dom_extractor = DomExtractorConfig(
         enabled=False,  # Disabled
-        identity_email="test@example.com",
+        method="sec-parser",
         validation=validation
     )
     config = Config(
@@ -558,13 +602,13 @@ def test_extract_risk_factors_with_fallback_disabled(tmp_path) -> None:
         llm=LLMConfig(model="test", temperature=0.0),
         drift=DriftConfig(review_cron="0 3 * * *", sample_size=100, low_confidence_threshold=0.6, drift_threshold=0.2),
         logging=LoggingConfig(level="INFO"),
-        edgar=edgar,
+        dom_extractor=dom_extractor,
         redis_url="redis://localhost",
         environment="test"
     )
     
-    # Should go straight to fallback without trying edgartools
+    # Should go straight to regex without trying sec-parser
     text, method = extract_risk_factors_with_fallback("AAPL", 2024, str(html_file), config)
     
-    assert method == "fallback"
+    assert method == "regex"
     assert "risk factors extracted" in text.lower()

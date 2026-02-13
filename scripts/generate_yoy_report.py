@@ -21,6 +21,7 @@ Example:
 
 import sys
 import argparse
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, TYPE_CHECKING
@@ -30,6 +31,7 @@ from collections import defaultdict
 from dotenv import load_dotenv
 from sigmak import filings_db
 from sigmak.integration import IntegrationPipeline
+from sigmak.ingest import extract_risk_factors_with_fallback
 from sigmak.risk_classification_service import RiskClassificationService
 import os
 from sigmak.integration import RiskAnalysisResult
@@ -1026,6 +1028,27 @@ Examples:
     
     args = parser.parse_args()
     
+    # Setup output log directory and file logging
+    log_dir = Path("output/log")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+    script_name = Path(__file__).stem if '__file__' in globals() else 'generate_yoy_report'
+    log_file = log_dir / f"{script_name}_{ts}.log"
+
+    # Configure root logger to also write to the file
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    # Avoid adding multiple handlers if main() is invoked multiple times
+    if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '') == str(log_file) for h in root_logger.handlers):
+        fh = logging.FileHandler(str(log_file), encoding='utf-8')
+        fh.setLevel(logging.INFO)
+        fmt = logging.Formatter('%(asctime)s %(levelname)s %(name)s:%(lineno)d %(message)s')
+        fh.setFormatter(fmt)
+        root_logger.addHandler(fh)
+
+    # Also emit a small header to the log file
+    logging.info(f"Logging to {log_file}")
+
     # Set defaults
     ticker = args.ticker.upper()
     years = args.years if args.years else [2023, 2024, 2025]
@@ -1124,6 +1147,27 @@ Examples:
             retrieve_top_k=10
         )
         results.append(result)
+
+        # Save extracted Item 1A snippet to output/log if available
+        try:
+            # Attempt to re-run extraction to obtain raw Item 1A section
+            extraction_text, extraction_method = extract_risk_factors_with_fallback(
+                ticker=ticker_sym,
+                year=year,
+                html_path=html_path,
+                config=pipeline.indexing_pipeline.config
+            )
+
+            if extraction_text and len(extraction_text.strip()) > 0:
+                snippet_filename = log_dir / f"{ticker_sym}_{year}_item1a_extract_{ts}.txt"
+                with open(snippet_filename, 'w', encoding='utf-8') as sf:
+                    sf.write(f"# Extraction method: {extraction_method}\n")
+                    sf.write(f"# Source: {html_path}\n")
+                    sf.write(f"# Timestamp: {datetime.now().isoformat()}\n\n")
+                    sf.write(extraction_text)
+                logging.info(f"Saved extracted Item 1A snippet: {snippet_filename}")
+        except Exception as e:
+            logging.exception(f"Failed to save Item 1A snippet for {ticker_sym} {year}: {e}")
     
     # Generate report
     print(f"\n{'='*60}")

@@ -43,8 +43,8 @@ pdf = [
     "markdown>=3.5.0",
     "jinja2>=3.1.0",
 ]
-edgar = [
-    "edgartools>=2.0.0",
+dom-parsing = [
+    "sec-parser>=0.58.0",
 ]
 
 [dependency-groups]
@@ -77,6 +77,6 @@ module = [
     "lxml.*",
     "google.genai.*",
     "vaderSentiment.*",
-    "edgar.*"
+    "sec_parser.*"
 ]
 ignore_missing_imports = true
