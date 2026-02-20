@@ -286,7 +286,11 @@ class TestErrorHandling:
         html_without_1a = """
         <html>
             <body>
-                <div>Some risk content but no explicit Item 1A marker</div>
+                <div>We face significant risks in our business operations. Competition
+                may reduce our revenue. Economic conditions affect our performance.
+                Our operations depend on third-party suppliers and vendors.
+                Regulatory changes could negatively impact our business model.
+                Cybersecurity threats pose ongoing risks to our infrastructure.</div>
             </body>
         </html>
         """
@@ -591,7 +595,11 @@ class TestEdgeCases:
         <html>
             <body>
                 <div>ITEM 1A. RISK FACTORS</div>
-                <p>We face competition risks in our markets.</p>
+                <p>We face significant competition risks in our markets. Our competitors
+                may offer superior products at lower prices. Economic downturns could
+                reduce customer demand for our offerings. Regulatory changes may increase
+                our operating costs and compliance burden. These risks could adversely
+                affect our revenue and financial condition.</p>
             </body>
         </html>
         """

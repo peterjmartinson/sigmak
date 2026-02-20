@@ -172,6 +172,11 @@ CATEGORY_METADATA: Dict[RiskCategory, Dict[str, Any]] = {
         "severity_multiplier": 0.9,
         "description": "Brand and stakeholder perception risks"
     },
+    RiskCategory.BOILERPLATE: {
+        "keywords": [],
+        "severity_multiplier": 0.0,  # Not a real risk; always filtered before scoring
+        "description": "Non-risk content: TOC lines, headers, intro text, metadata"
+    },
     RiskCategory.OTHER: {
         "keywords": [],
         "severity_multiplier": 1.0,
