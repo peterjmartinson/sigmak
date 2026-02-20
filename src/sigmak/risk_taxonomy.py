@@ -98,6 +98,16 @@ class RiskCategory(str, Enum):
     product recalls affecting brand, customer trust erosion.
     """
     
+    # Non-risk content (boilerplate, TOC, headers, metadata)
+    BOILERPLATE = "boilerplate"
+    """
+    Table of contents, section headers, page numbers, filing metadata,
+    generic introductory text, or any text that is NOT an actual risk
+    disclosure from Item 1A.
+    Examples: TOC lines, "The risks described below...", navigation elements,
+    document structure text, placeholder content.
+    """
+    
     # Catch-all for risks that don't fit primary categories
     OTHER = "other"
     """

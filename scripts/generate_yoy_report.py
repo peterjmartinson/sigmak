@@ -30,6 +30,7 @@ import json
 from collections import defaultdict
 from dotenv import load_dotenv
 from sigmak import filings_db
+from sigmak.filings_db import get_peer
 from sigmak.integration import IntegrationPipeline
 from sigmak.ingest import extract_risk_factors_with_fallback
 from sigmak.risk_classification_service import RiskClassificationService
@@ -41,6 +42,9 @@ if TYPE_CHECKING:
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Module-level logger
+logger = logging.getLogger(__name__)
 
 
 def validate_cached_result(data: Dict[str, Any]) -> Tuple[bool, str]:
@@ -517,6 +521,44 @@ def load_filing_provenance(ticker: str, filing_year: int, filings_db_path: str |
     return metadata
 
 
+def is_valid_risk_paragraph(text: str) -> bool:
+    """
+    Filter out boilerplate intro and TOC-like text from Item 1A.
+    
+    Returns False for:
+    - Short paragraphs (< 50 words) likely to be headers/TOC
+    - Item 1A title patterns
+    - TOC patterns (dots leading to numbers, page references)
+    - Generic intro statements without substance
+    
+    Args:
+        text: Risk paragraph text to validate
+        
+    Returns:
+        True if text appears to be a substantive risk disclosure
+    """
+    text_lower = text.lower().strip()
+    
+    # Minimum length heuristic (< 50 words = likely header/TOC)
+    if len(text.split()) < 50:
+        return False
+    
+    # Exclude Item 1A title patterns
+    if re.match(r'^item\s+1a[.\s\-:]+risk\s+factors', text_lower):
+        return False
+    
+    # Exclude TOC patterns (dots leading to numbers, page references)
+    if re.search(r'\.{3,}|\bpage\s+\d+', text_lower):
+        return False
+    
+    # Exclude pure list-of-contents statements (if short)
+    if re.search(r'^(this section|the following|we face|risks include)', text_lower):
+        if len(text.split()) < 80:  # Allow if substantive
+            return False
+    
+    return True
+
+
 def generate_markdown_report(
     ticker: str,
     results: List["RiskAnalysisResult"],
@@ -540,8 +582,12 @@ def generate_markdown_report(
     # Build the report
     report_lines = []
     
+    # Fetch company name from peers table
+    peer_info = get_peer(filings_db_path, ticker) if filings_db_path else None
+    company_name = peer_info.get('name', ticker) if peer_info else ticker
+    
     # Header
-    report_lines.append(f"# {ticker} — Risk Factor Analysis")
+    report_lines.append(f"# {company_name} ({ticker}) — Risk Factor Analysis")
     report_lines.append(f"## Item 1A Deep Dive: {latest_year} 10-K")
     report_lines.append("")
     report_lines.append(f"**Report Date:** {datetime.now().strftime('%B %d, %Y')}")
@@ -626,14 +672,14 @@ def generate_markdown_report(
     report_lines.append("")
     
     if total_new > 0:
-        report_lines.append(f"🚨 **NEW:** {total_new} risk factor(s) added — signals shifting exposure; review disclosure language for operational changes.")
+        report_lines.append(f"**[ALERT] NEW:** {total_new} risk factor(s) added — signals shifting exposure; review disclosure language for operational changes.")
     
     if total_disappeared > 0:
-        report_lines.append(f"✅ **RESOLVED:** {total_disappeared} risk factor(s) dropped from disclosure — potential business improvement or strategic pivot.")
+        report_lines.append(f"**[RESOLVED]:** {total_disappeared} risk factor(s) dropped from disclosure — potential business improvement or strategic pivot.")
     
     # Safety check: only show alert if we have risks to analyze
     if len(latest_result.risks) > 0 and high_severity >= len(latest_result.risks) * 0.4:
-        report_lines.append(f"⚠️ **ALERT:** {100*high_severity/len(latest_result.risks):.0f}% of disclosures are high severity — elevated risk profile requires close portfolio monitoring.")
+        report_lines.append(f"**[ALERT]:** {100*high_severity/len(latest_result.risks):.0f}% of disclosures are high severity — elevated risk profile requires close portfolio monitoring.")
     
     report_lines.append("")
     report_lines.append("### Risk Severity Distribution")
@@ -654,7 +700,7 @@ def generate_markdown_report(
     report_lines.append("")
     
     # Add severity legend and percentile
-    report_lines.append("**Severity Legend:** 🔴 Critical ≥0.75 | 🟠 High 0.50–0.74 | 🟡 Medium 0.30–0.49 | 🟢 Low <0.30")
+    report_lines.append("**Severity Legend:** [CRIT] ≥0.80 | [HIGH] 0.70–0.79 | [MED] 0.50–0.69 | [LOW] <0.50")
     report_lines.append("")
     report_lines.append(f"**{ticker} avg severity percentile vs. universe:** <placeholder percentile>")
     report_lines.append("")
@@ -719,10 +765,8 @@ def generate_markdown_report(
     report_lines.append("---")
     report_lines.append("")
     
-    # Top 10 Risks by Severity (Latest Year)
+    # Material Risk Factors (Latest Year) - Sorted by Novelty
     report_lines.append(f"## Material Risk Factors — {latest_year}")
-    report_lines.append("")
-    report_lines.append("The following represents the most severe risk disclosures requiring investor attention:")
     report_lines.append("")
     
     # Load provenance for evidence links
@@ -731,11 +775,34 @@ def generate_markdown_report(
     if base_sec_url == '<SEC_URL>':
         base_sec_url = f"https://www.sec.gov/Archives/edgar/data/{provenance['cik']}/{provenance['accession'].replace('-', '')}/{provenance['accession']}.htm"
     
+    # Filter out boilerplate/intro paragraphs before sorting
+    valid_risks = [r for r in latest_result.risks if is_valid_risk_paragraph(r['text'])]
+    
+    # Filter out BOILERPLATE category (TOC, headers, metadata)
+    boilerplate_risks = [r for r in valid_risks if r.get('category', '').lower() == 'boilerplate']
+    valid_risks = [r for r in valid_risks if r.get('category', '').lower() != 'boilerplate']
+    
+    # Log boilerplate filtering for visibility
+    if boilerplate_risks:
+        logging.info(f"Filtered {len(boilerplate_risks)} BOILERPLATE chunks from {ticker} {latest_year}")
+        for bp in boilerplate_risks:
+            logging.debug(f"  Boilerplate: {bp['text'][:80]}...")
+    
+    # Sort by novelty (most novel first) instead of severity
     sorted_risks = sorted(
-        latest_result.risks,
-        key=lambda r: r.get('severity', {}).get('value', 0),
+        valid_risks,
+        key=lambda r: r.get('novelty', {}).get('value', 0),
         reverse=True
-    )[:10]
+    )
+    
+    # Handle zero-risk case
+    num_risks = len(sorted_risks)
+    if num_risks == 0:
+        report_lines.append("**No material risks detected after filtering boilerplate.**")
+        report_lines.append("")
+    else:
+        report_lines.append(f"The following {num_risks} risk factor(s) are ordered by novelty (most novel/unprecedented first):")
+        report_lines.append("")
     
     for i, risk in enumerate(sorted_risks, 1):
         severity = risk.get('severity', {})
@@ -746,20 +813,20 @@ def generate_markdown_report(
         severity_val = severity.get('value', 0)
         novelty_val = novelty.get('value', 0)
         
-        # Determine risk label
+        # Determine risk label (ASCII-only for PDF compatibility)
         if severity_val >= 0.8:
-            risk_label = "🔴 CRITICAL"
+            risk_label = "[CRIT]"
         elif severity_val >= 0.7:
-            risk_label = "🟠 HIGH"
+            risk_label = "[HIGH]"
         elif severity_val >= 0.5:
-            risk_label = "🟡 MODERATE"
+            risk_label = "[MED]"
         else:
-            risk_label = "🟢 LOW"
+            risk_label = "[LOW]"
         
-        # Determine status badge
+        # Determine status badge (ASCII-only for PDF compatibility)
         status_badge = ""
         if novelty_val >= 0.50:
-            status_badge = " ★ NEW"
+            status_badge = " [NEW]"
         
         # Check if this risk was in previous years (dropped status)
         for dropped in changes['disappeared_risks']:
@@ -781,8 +848,8 @@ def generate_markdown_report(
         # Count supporting quotes (default to 1 for the current quote)
         supporting_quotes = risk.get('metadata', {}).get('chunk_count', 1)
         
-        # Build evidence URL with anchor
-        evidence_url = f"{base_sec_url}#para{i}"
+        # NOTE: evidence_url removed - paragraph anchors were inaccurate (used enumerate index not real para IDs)
+        # TODO: Re-enable when paragraph IDs can be accurately mapped to SEC filing anchors
         
         # Generate impact label from severity explanation
         severity_explanation = severity.get('explanation', 'material business impact')
@@ -856,8 +923,7 @@ def generate_markdown_report(
             report_lines.append(f"**Key Risk Factors:** {evidence_text}")
             report_lines.append("")
         
-        # Add filing citation
-        report_lines.append(f"**Filing Reference:** [View in 10-K]({evidence_url})")
+        # Filing citation removed - see note above about inaccurate paragraph anchors
         report_lines.append("")
         report_lines.append("---")
         report_lines.append("")
@@ -975,6 +1041,12 @@ def generate_markdown_report(
     report_lines.append("- **HUMAN_CAPITAL**: Workforce, talent, labor relations")
     report_lines.append("- **REPUTATIONAL**: Brand, trust, public perception")
     report_lines.append("- **SYSTEMATIC**: Macro conditions, market volatility")
+    report_lines.append("")
+    report_lines.append("---")
+    report_lines.append("")
+    report_lines.append("## Legal Disclaimer")
+    report_lines.append("")
+    report_lines.append("**Use at your own risk.** This report is for informational purposes only and does not constitute investment advice, financial advice, trading advice, or any other sort of advice. We cannot guarantee investment returns; you may lose money. Past performance is not indicative of future results. Always conduct your own research and consult a qualified financial advisor before making investment decisions.")
     report_lines.append("")
     report_lines.append("---")
     report_lines.append("")
@@ -1131,7 +1203,7 @@ Examples:
     
     # Initialize pipeline
     pipeline = IntegrationPipeline(
-        persist_path="./chroma_db",
+        persist_path="./database",
         db_only_classification=db_only_classification,
         db_only_similarity_threshold=db_only_similarity_threshold
     )

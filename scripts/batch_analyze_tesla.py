@@ -19,7 +19,7 @@ def main():
     
     # Initialize pipeline once
     print("🔍 Initializing analysis pipeline...")
-    pipeline = IntegrationPipeline(persist_path="./chroma_db")
+    pipeline = IntegrationPipeline(persist_path="./database")
     
     # Process each filing
     for html_path, ticker, year in filings:

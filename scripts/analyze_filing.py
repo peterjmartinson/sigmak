@@ -28,7 +28,7 @@ def main():
     
     # Initialize pipeline
     print(f"\n🔍 Initializing analysis pipeline...")
-    pipeline = IntegrationPipeline(persist_path="./chroma_db")
+    pipeline = IntegrationPipeline(persist_path="./database")
 
     # Classification helper: prefer RiskClassificationService when GOOGLE_API_KEY set
     classification_service = None

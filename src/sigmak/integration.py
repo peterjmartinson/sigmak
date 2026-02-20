@@ -35,6 +35,7 @@ from sigmak.risk_classifier import RiskClassifierWithLLM
 from sigmak.llm_classifier import GeminiClassifier
 from sigmak.llm_storage import LLMStorage
 from sigmak.drift_detection import DriftDetectionSystem, ClassificationSource
+from sigmak.processing import is_valid_risk_chunk
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ class IntegrationPipeline:
     - Scoring (severity + novelty)
     
     Usage:
-        >>> pipeline = IntegrationPipeline(persist_path="./chroma_db")
+        >>> pipeline = IntegrationPipeline(persist_path="./database")
         >>> result = pipeline.analyze_filing(
         ...     html_path="data/sample_10k.html",
         ...     ticker="AAPL",
@@ -284,6 +285,16 @@ class IntegrationPipeline:
             )
         except Exception as e:
             raise IntegrationError(f"Semantic search failed: {e}") from e
+        
+        # Step 3a: Filter out boilerplate (safety net for edge cases)
+        original_count = len(search_results)
+        search_results = [
+            chunk for chunk in search_results
+            if is_valid_risk_chunk(chunk.get('text', ''))
+        ]
+        filtered_count = original_count - len(search_results)
+        if filtered_count > 0:
+            logger.info(f"Filtered {filtered_count} boilerplate chunks from results")
         
         # Step 4: Score each chunk
         risks = []

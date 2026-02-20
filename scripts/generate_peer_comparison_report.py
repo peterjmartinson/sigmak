@@ -14,13 +14,14 @@ The script exits with an informative message if a required download fails.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
 from statistics import mean, median
 import re
 from collections import Counter
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 from dotenv import load_dotenv
 
 from sigmak.integration import IntegrationPipeline, IntegrationError, RiskAnalysisResult
@@ -131,6 +132,120 @@ def ensure_filing(downloader: TenKDownloader, ticker: str, year: int) -> Path:
     return html
 
 
+def validate_cached_result(data: Dict[str, Any]) -> Tuple[bool, str]:
+    """Validate that cached JSON has required fields.
+    
+    Args:
+        data: Loaded JSON data
+        
+    Returns:
+        Tuple of (is_valid, reason_if_invalid)
+    """
+    risks = data.get('risks', [])
+    if not risks:
+        return True, ""  # Empty results are valid
+    
+    # Check for classification fields
+    missing_classification = False
+    
+    for risk in risks:
+        if not risk.get('category'):
+            missing_classification = True
+            break
+    
+    if missing_classification:
+        return False, "missing risk classification"
+    
+    return True, ""
+
+
+def load_or_analyze_with_cache(
+    pipeline: IntegrationPipeline,
+    html_path: str,
+    ticker: str,
+    year: int,
+    retrieve_top_k: int = 100
+) -> RiskAnalysisResult:
+    """Load cached results or analyze filing fresh.
+    
+    Args:
+        pipeline: Integration pipeline instance
+        html_path: Path to HTML filing
+        ticker: Stock ticker symbol
+        year: Filing year
+        retrieve_top_k: Number of top risks to retrieve
+        
+    Returns:
+        RiskAnalysisResult with full risk analysis
+    """
+    cache_file = Path(f"output/results_{ticker}_{year}.json")
+    
+    # Try to load from cache
+    if cache_file.exists():
+        logger.info(f"Loading cached results for {ticker} {year}...")
+        try:
+            with open(cache_file, 'r') as f:
+                data = json.load(f)
+                
+                # Validate cached results
+                is_valid, reason = validate_cached_result(data)
+                
+                if is_valid:
+                    logger.info(f"✅ Using cached results for {ticker} {year}")
+                    return RiskAnalysisResult(
+                        ticker=data['ticker'],
+                        filing_year=data['filing_year'],
+                        risks=data['risks'],
+                        metadata=data['metadata']
+                    )
+                else:
+                    logger.warning(f"Cached results for {ticker} {year} incomplete ({reason}); re-analyzing...")
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Failed to load cache for {ticker} {year}: {e}; re-analyzing...")
+    
+    # Analyze fresh if no cache or invalid cache
+    logger.info(f"Analyzing {ticker} {year} from {html_path}...")
+    result = pipeline.analyze_filing(
+        html_path=html_path,
+        ticker=ticker,
+        filing_year=year,
+        retrieve_top_k=retrieve_top_k,
+        rerank=True
+    )
+    
+    # Cache results
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache_file, 'w') as f:
+        f.write(result.to_json())
+    logger.info(f"💾 Cached results to {cache_file}")
+    
+    return result
+
+
+def filter_boilerplate(result: RiskAnalysisResult) -> RiskAnalysisResult:
+    """Filter out BOILERPLATE category risks (TOC, headers, metadata).
+    
+    Args:
+        result: Risk analysis result
+        
+    Returns:
+        New RiskAnalysisResult with boilerplate risks removed
+    """
+    original_count = len(result.risks)
+    filtered_risks = [r for r in result.risks if r.get('category', '').lower() != 'boilerplate']
+    filtered_count = original_count - len(filtered_risks)
+    
+    if filtered_count > 0:
+        logger.info(f"Filtered {filtered_count} BOILERPLATE chunks from {result.ticker} {result.filing_year}")
+    
+    return RiskAnalysisResult(
+        ticker=result.ticker,
+        filing_year=result.filing_year,
+        risks=filtered_risks,
+        metadata=result.metadata
+    )
+
+
 def compute_severity_avg(result: RiskAnalysisResult) -> float:
     vals = [r.get("severity", {}).get("value", 0.0) for r in result.risks]
     return float(mean(vals)) if vals else 0.0
@@ -146,8 +261,12 @@ def compute_category_distribution(result: RiskAnalysisResult) -> Dict[str, float
 
 
 def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisResult], outpath: Path) -> None:
+    # Filter out BOILERPLATE risks from all results
     target_result = next(r for r in results if r.ticker.upper() == target.upper())
+    target_result = filter_boilerplate(target_result)
+    
     peer_results = [r for r in results if r.ticker.upper() != target.upper()]
+    peer_results = [filter_boilerplate(r) for r in peer_results]
 
     lines: List[str] = []
     lines.append(f"# Peer Comparison Report — {target} {year}")
@@ -553,7 +672,7 @@ def main() -> None:
         sys.exit(2)
 
     try:
-        target_result = pipeline.analyze_filing(str(target_html), target, year)
+        target_result = load_or_analyze_with_cache(pipeline, str(target_html), target, year)
     except IntegrationError as e:
         logger.error("Analysis failed for target %s: %s", target, e)
         print(f"Error: analysis failed for target {target}: {e}")
@@ -590,7 +709,7 @@ def main() -> None:
             continue
 
         try:
-            res = pipeline.analyze_filing(str(html_path), cand_u, year)
+            res = load_or_analyze_with_cache(pipeline, str(html_path), cand_u, year)
             collected.append(res)
         except IntegrationError as e:
             logger.warning("Analysis failed for peer %s: %s — skipping", cand_u, e)
