@@ -323,9 +323,23 @@ def test_extract_risk_factors_via_secparser_success(tmp_path) -> None:
     </html>
     """
     html_file.write_text(html_content)
-    
-    result = extract_risk_factors_via_secparser(str(html_file), config)
-    
+
+    # Mock sec_parser to avoid dependence on Edgar10QParser's internal HTML parsing.
+    # Edgar10QParser is designed for XBRL-tagged EDGAR filings; plain-HTML test
+    # fixtures trigger InvalidTopSectionIn10Q and return empty element lists.
+    _risk_sentence = "Our business faces significant risks from competition and market forces. "
+    _mock_risk_text = _risk_sentence * 30  # 300+ words, 30 sentences, contains 'risk'
+
+    _e_header = MagicMock(); _e_header.text = "ITEM 1A. RISK FACTORS"
+    _e_body = MagicMock(); _e_body.text = _mock_risk_text
+    _e_end = MagicMock(); _e_end.text = "ITEM 1B. UNRESOLVED STAFF COMMENTS"
+
+    _mock_sp = MagicMock()
+    _mock_sp.Edgar10QParser.return_value.parse.return_value = [_e_header, _e_body, _e_end]
+
+    with patch.dict("sys.modules", {"sec_parser": _mock_sp}):
+        result = extract_risk_factors_via_secparser(str(html_file), config)
+
     assert result is not None
     assert "risks" in result.lower()
     assert len(result.split()) > 200
@@ -471,10 +485,22 @@ def test_extract_risk_factors_with_fallback_prefers_secparser(tmp_path) -> None:
         environment="test"
     )
     
-    text, method = extract_risk_factors_with_fallback("AAPL", 2024, str(html_file), config)
-    
+    # Mock sec_parser to avoid dependence on Edgar10QParser's internal HTML parsing.
+    _risk_sentence = "Our business faces significant risks from competition and market forces. "
+    _mock_risk_text = _risk_sentence * 30  # 300+ words, 30 sentences, contains 'risk'
+
+    _e_header = MagicMock(); _e_header.text = "ITEM 1A. RISK FACTORS"
+    _e_body = MagicMock(); _e_body.text = _mock_risk_text
+    _e_end = MagicMock(); _e_end.text = "ITEM 1B. UNRESOLVED STAFF COMMENTS"
+
+    _mock_sp = MagicMock()
+    _mock_sp.Edgar10QParser.return_value.parse.return_value = [_e_header, _e_body, _e_end]
+
+    with patch.dict("sys.modules", {"sec_parser": _mock_sp}):
+        text, method = extract_risk_factors_with_fallback("AAPL", 2024, str(html_file), config)
+
     assert method == "sec-parser"
-    assert "sec-parser" in text.lower() or "risk" in text.lower()
+    assert "risk" in text.lower()
     assert len(text.split()) > 200
 
 
