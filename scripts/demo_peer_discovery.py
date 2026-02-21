@@ -4,6 +4,7 @@
 Usage: python scripts/demo_peer_discovery.py AAPL
 """
 import sys
+import os
 import argparse
 import logging
 import threading
@@ -49,6 +50,11 @@ def parse_args(argv):
     p.add_argument("--refresh-db", action="store_true", help="Refresh peers in the filings DB for the target's industry")
     p.add_argument("--max-fetch", type=int, default=0, help="Limit number of companies to scan when refreshing (0 = no limit)")
     p.add_argument("--top", type=int, default=10, help="Number of peers to show")
+    p.add_argument(
+        "--yfinance",
+        action="store_true",
+        help="Use the YFinanceAdapter instead of SEC/SIC lookup (sets SIGMAK_PEER_YFINANCE_ENABLED=true automatically)",
+    )
     return p.parse_args(argv)
 
 
@@ -57,7 +63,30 @@ def main(argv):
     ticker = args.ticker.upper()
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.yfinance:
+        os.environ["SIGMAK_PEER_YFINANCE_ENABLED"] = "true"
+
     svc = PeerDiscoveryService()
+
+    if args.yfinance:
+        logger.info("Using YFinanceAdapter for %s (top=%d)", ticker, args.top)
+        try:
+            peers = _run_with_heartbeat(
+                svc.get_peers_via_yfinance, ticker, args.top,
+                heartbeat="fetching yfinance peers", interval=4.0,
+            )
+            if peers:
+                logger.info("Peers (%d):", len(peers))
+                for p in peers:
+                    cap_str = f"  market_cap=${p.market_cap:,}" if p.market_cap else "  market_cap=N/A"
+                    logger.info("  %-8s  %-40s%s", p.ticker, p.company_name, cap_str)
+            else:
+                logger.info("Peers: (none found — check SIGMAK_PEER_YFINANCE_ENABLED and yfinance install)")
+        except Exception:
+            logger.exception("Error while fetching yfinance peers for %s", ticker)
+        return 0
+
     cik = svc.ticker_to_cik(ticker)
     logger.info("Target: %s => CIK %s", ticker, cik)
     if not cik:

@@ -1,3 +1,60 @@
+## [2026-02-20] Add yfinance Peer Discovery Adapter (opt-in)
+
+### Status: COMPLETE ✓
+
+### Summary
+Added an optional, pluggable `YFinanceAdapter` for fast demo-quality peer discovery. Uses Yahoo Finance (via `yfinance`) to resolve a target ticker's industry, pull top industry companies, bulk-enrich with market-cap and metadata, apply a configurable believability filter with progressive threshold relaxation, and return a ranked `List[PeerRecord]`. Entirely opt-in (disabled by default); canonical SEC/EDGAR peer path is unchanged.
+
+### What I changed
+
+**1. New adapter package**
+- **Created**: `src/sigmak/adapters/__init__.py`
+- **Created**: `src/sigmak/adapters/yfinance_adapter.py`
+  - `PeerRecord` dataclass (ticker, company_name, market_cap, exchange, industry, sector, source, enriched_at)
+  - `YFinanceAdapter` with: `fetch_bulk()` (bulk yf.Tickers + JSON cache with TTL), `_resolve_industry_key()`, `_get_industry_candidates()` (defensive probe: top_companies → tickers → members), `_apply_filter_pipeline()` (fraction filter 0.10→0.05→0.02→0.0 with percentile fallback when target market_cap is None), `_upsert_peers_to_db()` side-effect
+  - All env-var config knobs: `SIGMAK_PEER_YFINANCE_*`
+
+**2. PeerDiscoveryService wrapper**
+- **Modified**: `src/sigmak/peer_discovery.py`
+  - Added `get_peers_via_yfinance(ticker, n)` — guards on `SIGMAK_PEER_YFINANCE_ENABLED`; delegates to `YFinanceAdapter.get_peers()`; no changes to existing methods
+
+**3. Tests (TDD)**
+- **Created**: `tests/test_peer_discovery_yfinance.py` — 10 tests, all mocked (no network)
+  - `test_bulk_fetch_uses_single_yf_tickers_call_and_caches`
+  - `test_bulk_fetch_cache_hit_skips_network_call`
+  - `test_filter_by_marketcap_and_fraction`
+  - `test_missing_target_marketcap_percentile_fallback`
+  - `test_min_peers_relaxation_progresses_correctly`
+  - `test_backoff_and_retries_on_transient_errors`
+  - `test_industry_object_probed_defensively`
+  - `test_industry_object_top_companies_dataframe`
+  - `test_adapter_disabled_returns_empty_list`
+  - `test_adapter_enabled_calls_get_peers`
+
+**4. Demo script**
+- **Modified**: `scripts/demo_peer_discovery.py`
+  - Added `--yfinance` flag; sets `SIGMAK_PEER_YFINANCE_ENABLED=true` automatically so no env export needed
+  - Prints each peer on its own line (ticker, company name, market cap) with formatted output
+  - `--refresh-db` / `--max-fetch` remain SEC-only; yfinance path returns early after printing
+
+**5. Docs**
+- **Modified**: `README.md` — added "Peer Discovery: yfinance Adapter (opt-in)" section with usage, config table, and ToS note
+
+### Tradeoffs
+
+| Decision | Rationale |
+|---|---|
+| Opt-in via env var | No implicit behavioral change for any existing caller |
+| `yf.Industry` probed defensively | yfinance internals vary by version; graceful fallback to `[]` avoids hard failures |
+| Cache by hash of sorted ticker list | Deterministic; invalidated by TTL only |
+| Progressive threshold relaxation | Avoids empty lists for small-cap targets while preserving quality for large-caps |
+| DB upsert as side-effect | Keeps `peers` table hydrated with Yahoo market_cap data without requiring a separate pipeline step |
+
+### Legal note
+`yfinance` wraps unofficial Yahoo Finance endpoints. Feature is opt-in for demo/PoC use only. Do not recommend for sustained production scraping in client deliverables.
+
+---
+
 ## [2026-02-14] Add BOILERPLATE Classification Category
 
 ### Status: COMPLETE ✓

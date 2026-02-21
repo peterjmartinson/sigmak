@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 import logging
 
 import requests
+
+if TYPE_CHECKING:
+    from sigmak.adapters.yfinance_adapter import PeerRecord
 
 logger = logging.getLogger(__name__)
 
@@ -227,3 +230,44 @@ class PeerDiscoveryService:
                 upsert_peer(self.db_path, t_up, other_cik, other_sic, company_info.get("title"))
                 count += 1
         return count
+
+    def get_peers_via_yfinance(
+        self,
+        ticker: str,
+        n: Optional[int] = None,
+    ) -> List[PeerRecord]:
+        """
+        Opt-in yfinance peer discovery.
+
+        Disabled by default. Enable with:
+            SIGMAK_PEER_YFINANCE_ENABLED=true
+
+        Returns List[PeerRecord] or [] if disabled / yfinance unavailable.
+        Side-effect: upserts enriched market_cap/exchange/industry into self.db_path.
+
+        NOTE: yfinance wraps unofficial Yahoo Finance endpoints. Review Yahoo's
+        Terms of Service before using in sustained production workflows.
+        """
+        if os.environ.get("SIGMAK_PEER_YFINANCE_ENABLED", "false").lower() != "true":
+            logger.info("get_peers_via_yfinance: disabled (set SIGMAK_PEER_YFINANCE_ENABLED=true to enable)")
+            return []
+
+        try:
+            from sigmak.adapters.yfinance_adapter import YFinanceAdapter
+        except ImportError:  # pragma: no cover
+            logger.error("get_peers_via_yfinance: sigmak.adapters.yfinance_adapter not found")
+            return []
+
+        adapter = YFinanceAdapter(
+            cache_dir=self.cache_dir,
+            ttl_seconds=int(os.environ.get("SIGMAK_PEER_YFINANCE_TTL_SECONDS", "86400")),
+            rate_limit_rps=float(os.environ.get("SIGMAK_PEER_YFINANCE_RATE_LIMIT_RPS", "1")),
+            max_retries=int(os.environ.get("SIGMAK_PEER_YFINANCE_MAX_RETRIES", "3")),
+            backoff_base=float(os.environ.get("SIGMAK_PEER_YFINANCE_BACKOFF_BASE", "0.5")),
+            min_peers=int(os.environ.get("SIGMAK_PEER_YFINANCE_MIN_PEERS", "5")),
+            min_abs_cap=int(os.environ.get("SIGMAK_PEER_YFINANCE_MIN_ABS_CAP", "50000000")),
+            n_peers=int(os.environ.get("SIGMAK_PEER_YFINANCE_N_PEERS", "10")),
+        )
+
+        effective_n = n or int(os.environ.get("SIGMAK_PEER_YFINANCE_N_PEERS", "10"))
+        return adapter.get_peers(ticker, n=effective_n, db_path=self.db_path)
