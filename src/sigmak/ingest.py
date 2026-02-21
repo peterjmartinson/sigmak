@@ -4,9 +4,11 @@
 import logging
 import re
 from pathlib import Path
+from typing import Optional, Tuple
 
 from bs4 import BeautifulSoup
 
+from sigmak.config import Config, DomExtractorConfig
 from sigmak.processing import chunk_risk_section
 
 # Setup basic logging
@@ -113,6 +115,191 @@ def slice_risk_factors(text: str) -> str:
 
     logger.info("Item 1A found but no end marker detected. Slicing from 1A to EOF.")
     return text[best_match.start() :].strip()
+
+def validate_risk_factors_text(text: str, config: DomExtractorConfig) -> bool:
+    """
+    Validate extracted risk factors text meets quality criteria.
+    
+    Checks:
+    - Word count within acceptable range
+    - Minimum sentence count
+    - Contains "risk" keyword if required
+    - Not a TOC entry pattern
+    
+    Args:
+        text: Extracted risk factors text
+        config: DOM extractor configuration with validation criteria
+        
+    Returns:
+        True if text passes all validation checks, False otherwise
+    """
+    if not text:
+        return False
+    
+    # Check for TOC-like patterns (e.g., "Item 1A. Risk Factors...14")
+    # TOC entries typically have dots leading to page numbers or very short content
+    toc_patterns = [
+        r'risk\s+factors[\s\.]+\d+$',  # "Risk Factors...14" or "RISK FACTORS 23"
+        r'item\s+1a[\s\.].*page\s+\d+',  # "Item 1A. Risk Factors Page 45"
+        r'\.{3,}',  # Multiple dots (leader dots in TOC)
+    ]
+    text_lower = text.lower()
+    for pattern in toc_patterns:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            logger.debug(f"Rejected: TOC pattern detected ({pattern})")
+            return False
+    
+    # Word count validation
+    words = text.split()
+    word_count = len(words)
+    
+    if word_count < config.validation.min_words:
+        logger.debug(f"Rejected: {word_count} words < minimum {config.validation.min_words}")
+        return False
+    
+    if word_count > config.validation.max_words:
+        logger.debug(f"Rejected: {word_count} words > maximum {config.validation.max_words}")
+        return False
+    
+    # Sentence count validation (simple heuristic: count periods, exclamation, question marks)
+    sentences = re.split(r'[.!?]+', text)
+    sentence_count = len([s for s in sentences if s.strip()])
+    
+    if sentence_count < config.validation.min_sentences:
+        logger.debug(f"Rejected: {sentence_count} sentences < minimum {config.validation.min_sentences}")
+        return False
+    
+    # Keyword validation
+    if config.validation.must_contain_risk:
+        if 'risk' not in text_lower:
+            logger.debug("Rejected: does not contain 'risk' keyword")
+            return False
+    
+    return True
+
+def extract_risk_factors_via_secparser(
+    html_path: str,
+    config: DomExtractorConfig
+) -> Optional[str]:
+    """
+    Extract Item 1A (Risk Factors) using sec-parser's DOM parser.
+    
+    This provides superior accuracy over regex-based extraction by using
+    the document's native semantic structure.
+    
+    Args:
+        html_path: Path to local HTML file
+        config: DOM extractor configuration with validation settings
+        
+    Returns:
+        Extracted risk factors text if successful and valid, None otherwise
+    """
+    try:
+        # Import sec-parser dynamically (optional dependency)
+        import sec_parser as sp
+    except ImportError:
+        logger.error(
+            "sec-parser not installed — falling back to regex. "
+            "To enable sec-parser run: uv add sec-parser"
+        )
+        return None
+    
+    try:
+        # Read HTML file with encoding fallbacks
+        path = Path(html_path)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+        except UnicodeDecodeError:
+            logger.warning(f"UTF-8 decode failed for {html_path}. Falling back to CP1252.")
+            with open(path, 'r', encoding='cp1252') as f:
+                html_content = f.read()
+        
+        # Parse with sec-parser (Edgar10QParser can handle 10-K files too)
+        elements = sp.Edgar10QParser().parse(html_content)
+        
+        # Find Item 1A section
+        risk_parts = []
+        in_risk_section = False
+        
+        for element in elements:
+            element_text = element.text.strip()
+            
+            # Check if this is the start of Item 1A
+            if re.search(r"ITEM\s+1A[\.\s\-:]+RISK\s+FACTORS", element_text, re.IGNORECASE):
+                in_risk_section = True
+                risk_parts.append(element_text)
+                continue
+            
+            # Check if we've reached the next section (Item 1B or Item 2)
+            if in_risk_section and re.search(r"ITEM\s+(1B|2)[\.\s\-:]", element_text, re.IGNORECASE):
+                break
+            
+            # Collect text while in risk section
+            if in_risk_section:
+                risk_parts.append(element_text)
+        
+        if not risk_parts:
+            logger.warning("sec-parser: No Item 1A section found")
+            return None
+        
+        risk_text = "\n".join(risk_parts)
+        
+        # Validate the extracted content
+        if not validate_risk_factors_text(risk_text, config):
+            logger.warning("sec-parser: Extracted text failed validation")
+            return None
+        
+        logger.info(f"sec-parser:success - Extracted {len(risk_text)} chars")
+        return risk_text
+        
+    except Exception as e:
+        logger.warning(f"sec-parser:error - {e}")
+        return None
+
+def extract_risk_factors_with_fallback(
+    ticker: str,
+    year: int,
+    html_path: str,
+    config: Config
+) -> Tuple[str, str]:
+    """
+    Orchestrator: Extract Item 1A using sec-parser first, fallback to regex-based extraction.
+    
+    Strategy:
+    1. If dom_extractor enabled and method="sec-parser", try DOM-based extraction
+    2. If that succeeds and validates, return result with method="sec-parser"
+    3. Otherwise, fallback to existing slice_risk_factors() logic with method="regex"
+    
+    Args:
+        ticker: Company ticker symbol
+        year: Filing year
+        html_path: Path to downloaded HTML file (for fallback)
+        config: Full application config (includes dom_extractor settings)
+        
+    Returns:
+        Tuple of (extracted_text, extraction_method)
+        where method is either "sec-parser" or "regex"
+    """
+    # Try sec-parser if enabled
+    if config.dom_extractor.enabled and config.dom_extractor.method == "sec-parser":
+        logger.info(f"Attempting sec-parser extraction for {ticker} {year}")
+        secparser_result = extract_risk_factors_via_secparser(html_path, config.dom_extractor)
+        
+        if secparser_result:
+            logger.info(f"sec-parser:success for {ticker} {year}")
+            return (secparser_result, "sec-parser")
+        
+        logger.info(f"sec-parser failed, falling back to regex for {ticker} {year}")
+    else:
+        logger.info(f"sec-parser disabled, using regex extraction for {ticker} {year}")
+    
+    # Fallback to regex-based extraction
+    full_text = extract_text_from_file(html_path)
+    risk_text = slice_risk_factors(full_text)
+    
+    logger.info(f"fallback:regex for {ticker} {year} ({len(risk_text)} chars)")
+    return (risk_text, "regex")
 
 def run_ingestion_pipeline(html_content: str, ticker: str, year: int) -> str:
     """

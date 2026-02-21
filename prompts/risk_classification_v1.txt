@@ -31,7 +31,11 @@ Classify each risk into ONE of the following categories:
 9. **REPUTATIONAL**: Company reputation, brand value, and stakeholder trust
    - Examples: PR crises, ESG controversies, product recalls, customer trust erosion
 
-10. **OTHER**: Risks that don't clearly fit into primary categories
+10. **BOILERPLATE**: Table of contents, section headers, filing metadata, or non-risk text
+   - Examples: TOC lines ("Item 1.Business1Item 1A.Risk Factors9..."), generic introductory text ("The risks described below..."), page numbers, navigation elements, document structure text
+   - IMPORTANT: If the text is NOT describing a specific business risk, classify as BOILERPLATE
+
+11. **OTHER**: Risks that don't clearly fit into primary categories
 
 ## Instructions
 

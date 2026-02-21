@@ -61,6 +61,25 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class DomExtractorValidationConfig:
+    """DOM extractor validation configuration."""
+
+    min_words: int
+    max_words: int
+    min_sentences: int
+    must_contain_risk: bool
+
+
+@dataclass(frozen=True)
+class DomExtractorConfig:
+    """DOM-based extraction configuration (sec-parser, regex fallback)."""
+
+    enabled: bool
+    method: str
+    validation: DomExtractorValidationConfig
+
+
+@dataclass(frozen=True)
 class Config:
     """Root configuration."""
 
@@ -69,6 +88,7 @@ class Config:
     llm: LLMConfig
     drift: DriftConfig
     logging: LoggingConfig
+    dom_extractor: DomExtractorConfig
 
     # Backward-compatibility fields (env-only)
     redis_url: str
@@ -173,6 +193,33 @@ def load_config(path: Optional[Path] = None) -> Config:
         raise ValueError(f"Invalid log level: {log_level}")
     logging = LoggingConfig(level=log_level)
 
+    # Extract and validate dom_extractor config
+    dom_extractor_raw = raw.get("dom_extractor", {})
+    if not isinstance(dom_extractor_raw, dict):
+        raise ValueError("'dom_extractor' must be a dictionary")
+    dom_enabled = dom_extractor_raw.get("enabled", True)
+    if not isinstance(dom_enabled, bool):
+        raise ValueError("'dom_extractor.enabled' must be a boolean")
+    dom_method = dom_extractor_raw.get("method", "sec-parser")
+    if not isinstance(dom_method, str):
+        raise ValueError("'dom_extractor.method' must be a string")
+    
+    # Extract validation sub-config
+    validation_raw = dom_extractor_raw.get("validation", {})
+    if not isinstance(validation_raw, dict):
+        raise ValueError("'dom_extractor.validation' must be a dictionary")
+    validation = DomExtractorValidationConfig(
+        min_words=validation_raw.get("min_words", 200),
+        max_words=validation_raw.get("max_words", 50000),
+        min_sentences=validation_raw.get("min_sentences", 5),
+        must_contain_risk=validation_raw.get("must_contain_risk", True),
+    )
+    dom_extractor = DomExtractorConfig(
+        enabled=dom_enabled,
+        method=dom_method,
+        validation=validation,
+    )
+
     # Backward-compatibility env vars
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
     environment = os.environ.get("ENVIRONMENT", "development")
@@ -183,6 +230,7 @@ def load_config(path: Optional[Path] = None) -> Config:
         llm=llm,
         drift=drift,
         logging=logging,
+        dom_extractor=dom_extractor,
         redis_url=redis_url,
         environment=environment,
     )

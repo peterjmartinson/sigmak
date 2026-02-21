@@ -11,10 +11,11 @@ from chromadb.api.models.Collection import Collection
 from chromadb.api import ClientAPI
 
 from sigmak.init_vector_db import initialize_chroma
-from sigmak.ingest import extract_text_from_file, slice_risk_factors
+from sigmak.ingest import extract_risk_factors_with_fallback
 from sigmak.processing import chunk_risk_section
 from sigmak.embeddings import EmbeddingEngine
 from sigmak.reranking import CrossEncoderReranker
+from sigmak.config import get_settings
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +52,9 @@ class IndexingPipeline:
         """
         self.persist_path = persist_path
         
+        # Load application config (includes dom_extractor settings)
+        self.config = get_settings()
+        
         # Initialize Chroma DB
         self.client: ClientAPI
         self.collection: Collection
@@ -65,6 +69,9 @@ class IndexingPipeline:
         logger.info(
             f"IndexingPipeline initialized: "
             f"persist_path={persist_path}, model={embedding_model}"
+        )
+        logger.info(
+            f"DOM extraction: {'enabled' if self.config.dom_extractor.enabled else 'disabled'}"
         )
 
     @property
@@ -135,13 +142,15 @@ class IndexingPipeline:
         try:
             start_time = time.time()
             
-            # Step 1: Extract text from HTML
-            logger.info(f"Extracting text from {html_path}...")
-            full_text = extract_text_from_file(html_path)
-            
-            # Step 2: Isolate the risk factors section
-            logger.info(f"Slicing {item_type} from full text...")
-            risk_text = slice_risk_factors(full_text)
+            # Step 1 & 2: Extract Item 1A using sec-parser (with fallback to regex)
+            logger.info(f"Extracting {item_type} (sec-parser {'enabled' if self.config.dom_extractor.enabled else 'disabled'})...")
+            risk_text, extraction_method = extract_risk_factors_with_fallback(
+                ticker=ticker,
+                year=filing_year,
+                html_path=str(html_path),
+                config=self.config
+            )
+            logger.info(f"Extraction method: {extraction_method}")
             
             # Step 3: Chunk the text with metadata
             base_metadata = {

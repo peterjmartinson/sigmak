@@ -13,6 +13,18 @@ llm:
   model: "gemini-2.5-flash"
   temperature: 0.0
 
+dom_extractor:
+  # DOM-based extraction for Item 1A (sec-parser or regex fallback)
+  enabled: true
+  method: "sec-parser"  # "sec-parser" or "regex"
+  
+  # Validation criteria for extracted risk factors text
+  validation:
+    min_words: 200          # Minimum word count
+    max_words: 50000        # Maximum word count (catch full-document errors)
+    min_sentences: 5        # Minimum sentence count
+    must_contain_risk: true # Must contain the word "risk"
+
 drift:
   review_cron: "0 3 * * *"
   sample_size: 100

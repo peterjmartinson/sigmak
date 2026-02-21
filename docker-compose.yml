@@ -31,9 +31,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - LOG_LEVEL=INFO
       - ENVIRONMENT=development
-      - CHROMA_PERSIST_PATH=/app/chroma_db
+      - CHROMA_PERSIST_PATH=/app/database
     volumes:
-      - ./chroma_db:/app/chroma_db
+      - ./database:/app/database
       - ./logs:/app/logs
       - ./data:/app/data
     depends_on:
@@ -58,9 +58,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - LOG_LEVEL=INFO
       - ENVIRONMENT=development
-      - CHROMA_PERSIST_PATH=/app/chroma_db
+      - CHROMA_PERSIST_PATH=/app/database
     volumes:
-      - ./chroma_db:/app/chroma_db
+      - ./database:/app/database
       - ./logs:/app/logs
       - ./data:/app/data
     depends_on:

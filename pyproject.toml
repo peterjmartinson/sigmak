@@ -43,6 +43,9 @@ pdf = [
     "markdown>=3.5.0",
     "jinja2>=3.1.0",
 ]
+dom-parsing = [
+    "sec-parser>=0.58.0",
+]
 
 [dependency-groups]
 dev = [
@@ -73,6 +76,7 @@ module = [
     "langchain_text_splitters.*",
     "lxml.*",
     "google.genai.*",
-    "vaderSentiment.*"
+    "vaderSentiment.*",
+    "sec_parser.*"
 ]
 ignore_missing_imports = true
