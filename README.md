@@ -20,6 +20,45 @@ high-dimensional vector space for semantic analysis.
 
 - **Peer Discovery DB**: A lightweight `peers` SQLite table stores peer metadata (ticker, CIK, SIC, industry, market_cap). Upserts now preserve existing `market_cap` when an incoming update has no market-cap data to avoid accidental NULL overwrites.
  - **Peer Discovery DB**: A lightweight `peers` SQLite table stores peer metadata (ticker, CIK, SIC, industry, market_cap) and richer metadata (company name, SIC description, state of incorporation, recent filing dates). A new one-time `prefetch_peers` backfill utility parses cached `data/peer_discovery/submissions_*.json` files to populate the table; `PeerDiscoveryService` now prefers DB-first discovery to avoid thousands of live SEC calls.
+- **yfinance Peer Adapter** *(opt-in demo)*: An optional adapter that uses Yahoo Finance (via `yfinance`) to rapidly generate a believable peer list for any ticker. See [Peer Discovery: yfinance Adapter](#peer-discovery-yfinance-adapter-opt-in) below.
+
+## Peer Discovery: yfinance Adapter (opt-in)
+
+> **Demo / PoC only.** The canonical peer discovery path (SEC EDGAR + SIC matching) remains authoritative for production. This adapter is a fast, automatable alternative for demos.
+> **Legal note**: `yfinance` wraps unofficial Yahoo Finance endpoints. Review Yahoo's Terms of Service before sustained production use.
+
+### Enable
+
+```bash
+export SIGMAK_PEER_YFINANCE_ENABLED=true
+```
+
+### Usage
+
+```python
+from sigmak.peer_discovery import PeerDiscoveryService
+
+svc = PeerDiscoveryService()
+peers = svc.get_peers_via_yfinance("NVDA", n=10)
+for p in peers:
+    print(p.ticker, p.company_name, p.market_cap)
+```
+
+### Configuration knobs (env vars)
+
+| Variable | Default | Description |
+|---|---|---|
+| `SIGMAK_PEER_YFINANCE_ENABLED` | `false` | Must be `true` to enable |
+| `SIGMAK_PEER_YFINANCE_N_PEERS` | `10` | Max peers to return |
+| `SIGMAK_PEER_YFINANCE_MIN_PEERS` | `5` | Min peers before threshold relaxation triggers |
+| `SIGMAK_PEER_YFINANCE_TTL_SECONDS` | `86400` | Cache TTL (24 h) |
+| `SIGMAK_PEER_YFINANCE_MIN_FRACTION` | `0.10` | Min market-cap as fraction of target |
+| `SIGMAK_PEER_YFINANCE_MIN_ABS_CAP` | `50000000` | Absolute market-cap floor ($50 M) |
+| `SIGMAK_PEER_YFINANCE_RATE_LIMIT_RPS` | `1` | Soft rate limit (req/s) |
+| `SIGMAK_PEER_YFINANCE_MAX_RETRIES` | `3` | Retries on transient errors |
+| `SIGMAK_PEER_YFINANCE_BACKOFF_BASE` | `0.5` | Exponential backoff base (seconds) |
+
+Cached payloads are written to `cache_dir/yfinance/` and **must not be committed to the repo** (already covered by `.gitignore`).
 
 ## System Architecture
 
