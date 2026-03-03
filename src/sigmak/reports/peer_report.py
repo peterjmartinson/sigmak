@@ -609,6 +609,7 @@ def run_peer_comparison(
     max_peers: int,
     explicit_peers: List[str] | None,
     db_only: bool,
+    use_sic_only: bool = False,
     db_path: str = "./database/sec_filings.db",
     download_dir: str = "./data/filings",
 ) -> None:
@@ -623,6 +624,9 @@ def run_peer_comparison(
                  If provided, use these tickers as the peer list instead of
                  auto-discovery.
     db_only:     When True, skip LLM classification and use ChromaDB only.
+    use_sic_only:
+                 When True, use SIC/EDGAR peer selection instead of yfinance
+                 (the default).
     db_path:     Path to the SQLite filings database.
     download_dir:
                  Base directory where 10-K HTML files are stored.
@@ -659,8 +663,11 @@ def run_peer_comparison(
 
     if explicit_peers:
         candidates = [p.upper() for p in explicit_peers if p.upper() != target]
-    else:
+    elif use_sic_only:
         candidates = svc.find_peers_for_ticker(target, top_n=max(desired * 3, desired + 6))
+    else:
+        peer_records = svc.get_peers_via_yfinance(target, n=max(desired * 3, desired + 6))
+        candidates = [pr.ticker.upper() for pr in peer_records]
 
     for cand in candidates:
         if len(collected) >= desired:
