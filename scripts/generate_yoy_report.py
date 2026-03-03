@@ -18,33 +18,27 @@ For custom companies:
 Example:
     python generate_yoy_report.py HURC 2023 2024 2025
 """
+from __future__ import annotations  # defer annotation evaluation
 
-import sys
 import argparse
-import logging
-from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Any, Tuple, TYPE_CHECKING
-import re
 import json
+import logging
+import os
+import re
+import sys
 from collections import defaultdict
-from dotenv import load_dotenv
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, TYPE_CHECKING
+
 from sigmak import filings_db
 from sigmak.filings_db import get_peer
-from sigmak.integration import IntegrationPipeline
+from sigmak.integration import IntegrationPipeline, RiskAnalysisResult
 from sigmak.ingest import extract_risk_factors_with_fallback
 from sigmak.risk_classification_service import RiskClassificationService
-import os
-from sigmak.integration import RiskAnalysisResult
 
 if TYPE_CHECKING:
-    from sigmak.integration import RiskAnalysisResult
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Module-level logger
-logger = logging.getLogger(__name__)
+    pass  # All runtime imports are already at module level above
 
 
 def validate_cached_result(data: Dict[str, Any]) -> Tuple[bool, str]:
@@ -1099,37 +1093,21 @@ Examples:
     )
     
     args = parser.parse_args()
-    
-    # Setup output log directory and file logging
-    log_dir = Path("output/log")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d%H%M%S")
-    script_name = Path(__file__).stem if '__file__' in globals() else 'generate_yoy_report'
-    log_file = log_dir / f"{script_name}_{ts}.log"
 
-    # Configure root logger to also write to the file
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    # Avoid adding multiple handlers if main() is invoked multiple times
-    if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '') == str(log_file) for h in root_logger.handlers):
-        fh = logging.FileHandler(str(log_file), encoding='utf-8')
-        fh.setLevel(logging.INFO)
-        fmt = logging.Formatter('%(asctime)s %(levelname)s %(name)s:%(lineno)d %(message)s')
-        fh.setFormatter(fmt)
-        root_logger.addHandler(fh)
+    from sigmak.reports.yoy_report import run_yoy_analysis
 
-    # Also emit a small header to the log file
-    logging.info(f"Logging to {log_file}")
+    run_yoy_analysis(
+        ticker=(args.ticker or "HURC").upper(),
+        years=args.years if args.years else [2023, 2024, 2025],
+        use_llm=False,
+        db_only=args.db_only_classification,
+        db_only_similarity_threshold=args.db_only_similarity_threshold,
+    )
+    sys.exit(0)
 
-    # Set defaults
-    ticker = args.ticker.upper()
-    years = args.years if args.years else [2023, 2024, 2025]
-    db_only_classification = args.db_only_classification
-    db_only_similarity_threshold = args.db_only_similarity_threshold
-    
-    # Validate years
-    if len(years) < 2:
-        parser.error("At least 2 years required for YoY comparison")
+
+if __name__ == "__main__":
+    main()
     
     # Build file paths (robust recursive search)
     filings = []

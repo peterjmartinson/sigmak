@@ -1,3 +1,32 @@
+## [2026-03-03] Issue 102: Wire yoy CLI Subcommand
+
+### Status: COMPLETE ✓
+
+### Summary
+Extracted all business logic from `scripts/generate_yoy_report.py` into a new library module `src/sigmak/reports/yoy_report.py`. Added `run_yoy_analysis()` as the single orchestration entry point. Updated `src/sigmak/cli/yoy.py` to call it. Added `--years` arg to the `yoy` subparser in `__main__.py`. The original script retains its function bodies for backward compatibility with existing tests that load it directly; its `main()` now delegates entirely to `run_yoy_analysis()`. 4 new unit tests written first (TDD). Zero regressions.
+
+### What I changed
+
+**New files**
+- `src/sigmak/reports/__init__.py` — empty package marker
+- `src/sigmak/reports/yoy_report.py` — `validate_cached_result`, `enrich_result_with_classification`, `load_or_analyze_filing`, `calculate_risk_similarity`, `identify_risk_changes`, `calculate_category_distribution`, `extract_category_from_text`, `suggest_categories_from_keywords`, `load_filing_provenance`, `is_valid_risk_paragraph`, `generate_markdown_report`, `run_yoy_analysis`
+- `tests/test_cli_yoy.py` — 4 unit tests (TDD)
+
+**Modified files**
+- `src/sigmak/cli/yoy.py` — replaced stub with real delegate to `run_yoy_analysis()`
+- `src/sigmak/__main__.py` — added `--years nargs="+" type=int default=[2023,2024,2025]` to `yoy` subparser
+- `scripts/generate_yoy_report.py` — `main()` replaced with thin wrapper calling `run_yoy_analysis()`; original function bodies retained for test backward compatibility
+
+### Test results
+```
+18 passed in 12.27s  (4 new + 11 from issue 101 + 3 from test_filings_db_and_report)
+```
+
+### Note
+`scripts/generate_yoy_report.py` keeps its duplicate function bodies until Issue 6 (script cleanup/deletion). The authoritative implementations now live in `src/sigmak/reports/yoy_report.py`.
+
+---
+
 ## [2026-03-03] Issue 101: CLI Entry Point Scaffold
 
 ### Status: COMPLETE ✓
