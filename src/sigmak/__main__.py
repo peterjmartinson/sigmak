@@ -92,7 +92,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Use SIC/EDGAR peer selection instead of yfinance (default).",
     )
-    subparsers.add_parser("download", help="Download SEC filings.")
+    download_parser = subparsers.add_parser("download", help="Download SEC filings.")
+    download_parser.add_argument(
+        "--years",
+        nargs="+",
+        type=int,
+        default=None,
+        dest="years",
+        metavar="YEAR",
+        help="Filing years to download (default: latest available for each ticker).",
+    )
+    download_parser.add_argument(
+        "--include-peers",
+        action="store_true",
+        default=False,
+        dest="include_peers",
+        help="Also download filings for auto-discovered peers (uses yfinance).",
+    )
+    download_parser.add_argument(
+        "--max-peers",
+        type=int,
+        default=6,
+        dest="max_peers",
+        metavar="N",
+        help="Maximum number of peers to download when --include-peers is set (default: 6).",
+    )
     subparsers.add_parser("inspect", help="Inspect the local database.")
     subparsers.add_parser("render", help="Render a Markdown report to PDF.")
 

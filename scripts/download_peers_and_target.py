@@ -179,39 +179,20 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
-
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
 
-    downloader = TenKDownloader(db_path=args.db_path, download_dir=args.download_dir)
-    svc = PeerDiscoveryService(cache_dir=args.cache_dir, db_path=args.db_path)
+    from sigmak.cli.download import run
 
-    target = args.ticker.upper()
-    year = args.year  # may be None -> use latest available per-company
-
-    if args.peers:
-        peers = [p.upper() for p in args.peers]
-    else:
-        peers = select_peers_strict_sic(
-            svc,
-            args.db_path,
-            target,
-            year,
-            max_peers=args.max_peers,
-            require_filing_year=args.require_filing_year,
-        )
-
-    # Always include target first
-    to_process = [target] + [p for p in peers if p != target]
-
-    summary = {}
-    for t in to_process:
-        ticker, status = download_for_ticker(downloader, t, year, force_refresh=args.force_refresh)
-        summary[ticker] = status
-
-    # Print summary
-    print("\nDownload Summary:")
-    for t, s in summary.items():
-        print(f" - {t}: {s}")
+    run(
+        ticker=args.ticker.upper(),
+        years=[args.year] if args.year else None,
+        include_peers=args.peers is None,
+        db_only=False,
+        max_peers=args.max_peers,
+        explicit_peers=[p.upper() for p in args.peers] if args.peers else None,
+        db_path=args.db_path,
+        download_dir=args.download_dir,
+    )
 
 
 if __name__ == "__main__":
