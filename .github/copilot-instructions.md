@@ -32,6 +32,7 @@ Strictly adhere to these principles for every interaction:
 - **Typing**: Strict type annotations for all functions/classes (must pass `mypy`).
 - **Data Ingestion**: Focus exclusively on SEC EDGAR HTM filings (not PDFs). Use DOM navigation for "Item 1A: Risk Factors" extraction.
 - **NLP**: Use spaCy for lemmatization and tokenization. 
+- **Package Management**: Use `uv` for package management and virtual environments.  All program execution should be run with `uv run` to ensure the correct environment is used.
 
 ## Interaction Protocol
 - When asked to implement a feature, first output the **unit test** (adhering to SRP).

@@ -7,6 +7,23 @@
 filings, extracts specific risk sections, and indexes them into a
 high-dimensional vector space for semantic analysis.
 
+## CLI Usage
+
+```
+uv run sigmak --ticker AAPL yoy --years 2023 2024 2025
+uv run sigmak --ticker AAPL peers --year 2024
+uv run sigmak --ticker AAPL download
+uv run sigmak --ticker AAPL inspect
+uv run sigmak --ticker AAPL render --input output/AAPL_YoY.md
+```
+
+Global flags:
+```
+--ticker TICKER   Target company (required)
+--use-llm         Use LLM for classification (requires GOOGLE_API_KEY)
+--db-only         Use ChromaDB only, no LLM calls
+```
+
 ## Key Features
 
 - **Hybrid Risk Classification**: Combines vector search with LLM fallback for confident classification
