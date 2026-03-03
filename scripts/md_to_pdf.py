@@ -25,73 +25,24 @@ Dependencies:
 from pathlib import Path
 import argparse
 import sys
-from markdown import markdown
-from jinja2 import Template
-from weasyprint import HTML, CSS
 
 
-# Simple HTML template wrapper for the Markdown content
-HTML_TEMPLATE = """<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>{{ title }}</title>
-</head>
-<body>
-{{ content }}
-</body>
-</html>
-"""
-
-
+# HTML_TEMPLATE and convert_md_to_pdf now live in sigmak.reports.pdf_renderer.
+# This re-export preserves backward compatibility for any callers.
 def convert_md_to_pdf(
     md_path: Path,
     out_pdf: Path,
     css_path: Path,
-    title: str | None = None
+    title: str | None = None,
 ) -> None:
-    """
-    Convert Markdown file to styled PDF.
-    
-    Args:
-        md_path: Input Markdown file
-        out_pdf: Output PDF file
-        css_path: CSS stylesheet for PDF styling
-        title: Document title (defaults to filename stem)
-    
-    The conversion process:
-        1. Read Markdown text
-        2. Convert to HTML using Python-Markdown
-        3. Wrap in minimal HTML template
-        4. Render to PDF with CSS styling via WeasyPrint
-    """
-    # Read Markdown source
-    md_text = md_path.read_text(encoding="utf-8")
-    
-    # Convert Markdown → HTML
-    # Extensions: fenced_code (```) | tables | toc (auto table of contents)
-    html_body = markdown(
-        md_text,
-        extensions=["fenced_code", "tables", "toc"]
-    )
-    
-    # Wrap in minimal HTML template
-    template = Template(HTML_TEMPLATE)
-    html = template.render(
-        title=title or md_path.stem,
-        content=html_body
-    )
-    
-    # Render HTML → PDF with styling
-    # base_url allows relative image paths in Markdown to resolve correctly
-    HTML(string=html, base_url=str(md_path.parent)).write_pdf(
-        str(out_pdf),
-        stylesheets=[CSS(filename=str(css_path))]
-    )
+    """Thin wrapper — delegates to ``sigmak.reports.pdf_renderer.convert_md_to_pdf``."""
+    from sigmak.reports.pdf_renderer import convert_md_to_pdf as _impl
+
+    _impl(md_path, out_pdf, css_path, title)
 
 
 def main() -> None:
-    """CLI entry point."""
+    """Delegate to ``sigmak.cli.render.run``."""
     parser = argparse.ArgumentParser(
         description="Convert Markdown report to styled PDF",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -128,28 +79,15 @@ Examples:
     )
     
     args = parser.parse_args()
-    
-    # Validate input file exists
-    if not args.md.exists():
-        print(f"Error: Input file not found: {args.md}", file=sys.stderr)
-        sys.exit(1)
-    
-    # Validate CSS file exists
-    if not args.css.exists():
-        print(f"Error: CSS file not found: {args.css}", file=sys.stderr)
-        print(f"Hint: Create a default CSS at styles/report.css", file=sys.stderr)
-        sys.exit(1)
-    
-    # Default output path
-    out_pdf = args.out or args.md.with_suffix(".pdf")
-    
-    # Convert
-    try:
-        convert_md_to_pdf(args.md, out_pdf, args.css, args.title)
-        print(f"✓ Created PDF: {out_pdf}")
-    except Exception as e:
-        print(f"Error during conversion: {e}", file=sys.stderr)
-        sys.exit(1)
+
+    from sigmak.cli.render import run
+
+    run(
+        input_path=str(args.md),
+        output_path=str(args.out) if args.out else None,
+        css_path=str(args.css),
+        title=args.title,
+    )
 
 
 if __name__ == "__main__":

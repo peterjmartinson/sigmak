@@ -82,9 +82,9 @@ def test_inspect_subcommand_registered() -> None:
 
 
 def test_render_subcommand_registered() -> None:
-    """parse_args(['--ticker', 'AAPL', 'render']) sets args.command == 'render'."""
+    """parse_args(['--ticker', 'AAPL', 'render', '--input', 'x.md']) sets args.command == 'render'."""
     parser = build_parser()
-    args = parser.parse_args(["--ticker", "AAPL", "render"])
+    args = parser.parse_args(["--ticker", "AAPL", "render", "--input", "x.md"])
     assert args.command == "render"
 
 

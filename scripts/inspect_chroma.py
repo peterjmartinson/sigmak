@@ -138,35 +138,11 @@ def inspect_sqlite_schema(sqlite_path: str) -> Dict[str, Any]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """Orchestrate inspection and print JSON summary to stdout."""
+    """Delegate to ``sigmak.cli.inspect_db.run``."""
     args = parse_args(argv)
-    try:
-        client = create_client(args.dir)
-    except Exception as exc:
-        print("Failed to create chromadb client:", exc, file=sys.stderr)
-        return 2
+    from sigmak.cli.inspect_db import run
 
-    available = list_collection_names(client)
-    requested: List[str]
-    if args.collections:
-        requested = [c.strip() for c in args.collections.split(",") if c.strip()]
-    else:
-        requested = available
-
-    result: Dict[str, Any] = {"persist_dir": args.dir, "collections": {}, "available_collections": available}
-    for name in requested:
-        if name not in available:
-            result["collections"][name] = {"error": "collection not found"}
-            continue
-        sample = sample_collection(client, name, limit=args.max_sample, show_docs=args.show_docs, show_meta=args.show_metadata)
-        result["collections"][name] = sample
-
-    if args.inspect_sqlite:
-        sqlite_path = f"{args.dir.rstrip('/')}/chroma.sqlite3"
-        result["sqlite"] = inspect_sqlite_schema(sqlite_path)
-
-    # Pretty-print JSON to stdout so the caller can redirect or parse
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    run(ticker="", chroma_dir=args.dir, max_sample=args.max_sample)
     return 0
 
 
