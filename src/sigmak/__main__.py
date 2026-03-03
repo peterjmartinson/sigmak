@@ -12,6 +12,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 
@@ -84,6 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TICKER",
         help="Explicit peer tickers (overrides auto-discovery).",
     )
+    peers_parser.add_argument(
+        "--sic-only",
+        action="store_true",
+        dest="use_sic_only",
+        default=False,
+        help="Use SIC/EDGAR peer selection instead of yfinance (default).",
+    )
     subparsers.add_parser("download", help="Download SEC filings.")
     subparsers.add_parser("inspect", help="Inspect the local database.")
     subparsers.add_parser("render", help="Render a Markdown report to PDF.")
@@ -99,6 +107,8 @@ def main(argv: list[str] | None = None) -> None:
     argv:
         Argument list to parse. Defaults to sys.argv[1:] when None.
     """
+    os.environ.setdefault("SIGMAK_PEER_YFINANCE_ENABLED", "true")
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

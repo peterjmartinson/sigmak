@@ -3150,3 +3150,28 @@ delegates to the full peer comparison logic.
   (without `--year`) must be updated.
 - Script function bodies must remain intact due to `importlib`-based dynamic loading
   in `test_generate_peer_comparison_misfiled.py`.
+
+---
+
+## Issue #110 — yfinance peer selection as CLI default (2026-03-03)
+
+### Summary
+Changed the `peers` subcommand so yfinance-based peer discovery is the default.
+Added `--sic-only` flag to opt back into the SIC/EDGAR selection path.
+`SIGMAK_PEER_YFINANCE_ENABLED` is now set to `true` at CLI startup unless
+the environment already provides a value.
+
+### Changes
+| File | Change |
+|---|---|
+| `tests/test_cli_peers.py` | Updated `test_peers_run_calls_run_peer_comparison` to include `use_sic_only`; added 3 new tests |
+| `src/sigmak/__main__.py` | Added `import os`; `os.environ.setdefault("SIGMAK_PEER_YFINANCE_ENABLED","true")` in `main()`; `--sic-only` flag on `peers` subparser |
+| `src/sigmak/cli/peers.py` | Added `use_sic_only: bool = False` param; forwarded to `run_peer_comparison` |
+| `src/sigmak/reports/peer_report.py` | Added `use_sic_only: bool = False` param; branches on it for peer candidate selection |
+
+### Test Results
+23 tests passing (3 new + 20 regression).
+
+### Behavior
+- `uv run sigmak --ticker AAPL peers --year 2024` → uses yfinance
+- `uv run sigmak --ticker AAPL peers --year 2024 --sic-only` → uses SIC/EDGAR
