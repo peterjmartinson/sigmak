@@ -3175,3 +3175,30 @@ the environment already provides a value.
 ### Behavior
 - `uv run sigmak --ticker AAPL peers --year 2024` → uses yfinance
 - `uv run sigmak --ticker AAPL peers --year 2024 --sic-only` → uses SIC/EDGAR
+
+---
+
+## Issue #104 — Wire download subcommand (2026-03-03)
+
+### Summary
+Replaced the `download` CLI stub with real orchestration logic.
+`uv run sigmak --ticker NVDA download --years 2024` now downloads 10-K filings
+via the existing `TenKDownloader` and `PeerDiscoveryService` library classes.
+
+### Changes
+| File | Change |
+|---|---|
+| `tests/test_cli_download.py` | New — 4 SRP unit tests |
+| `src/sigmak/cli/download.py` | Replaced stub; `_download_one()` helper + `run()` with full orchestration |
+| `src/sigmak/__main__.py` | Added `--years`, `--include-peers`, `--max-peers` to download subparser |
+| `scripts/download_peers_and_target.py` | `main()` body replaced with thin delegate; `select_peers_strict_sic` and `download_for_ticker` bodies kept intact |
+
+### Test Results
+24 tests passing (4 new + 20 regression).
+
+### Design Notes
+- `cli/download.py` has module-level imports (not lazy) so `TenKDownloader`
+  and `PeerDiscoveryService` can be patched as `sigmak.cli.download.*` in tests.
+- Peer auto-discovery uses `get_peers_via_yfinance` (consistent with Issue 110).
+- Script function bodies remain in `scripts/download_peers_and_target.py` due
+  to `importlib`-based loading in `test_download_peers_and_target.py`.
