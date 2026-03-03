@@ -61,9 +61,9 @@ def test_yoy_subcommand_registered() -> None:
 
 
 def test_peers_subcommand_registered() -> None:
-    """parse_args(['--ticker', 'AAPL', 'peers']) sets args.command == 'peers'."""
+    """parse_args(['--ticker', 'AAPL', 'peers', '--year', '2024']) sets args.command == 'peers'."""
     parser = build_parser()
-    args = parser.parse_args(["--ticker", "AAPL", "peers"])
+    args = parser.parse_args(["--ticker", "AAPL", "peers", "--year", "2024"])
     assert args.command == "peers"
 
 

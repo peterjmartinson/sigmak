@@ -60,7 +60,30 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="YEAR",
         help="Filing years to analyse (default: 2023 2024 2025).",
     )
-    subparsers.add_parser("peers", help="Peer comparison report.")
+    peers_parser = subparsers.add_parser("peers", help="Peer comparison report.")
+    peers_parser.add_argument(
+        "--year",
+        type=int,
+        required=True,
+        metavar="YEAR",
+        help="Filing year to analyse.",
+    )
+    peers_parser.add_argument(
+        "--max-peers",
+        type=int,
+        default=6,
+        dest="max_peers",
+        metavar="N",
+        help="Maximum number of peers to include (default: 6).",
+    )
+    peers_parser.add_argument(
+        "--peers",
+        nargs="*",
+        dest="explicit_peers",
+        default=None,
+        metavar="TICKER",
+        help="Explicit peer tickers (overrides auto-discovery).",
+    )
     subparsers.add_parser("download", help="Download SEC filings.")
     subparsers.add_parser("inspect", help="Inspect the local database.")
     subparsers.add_parser("render", help="Render a Markdown report to PDF.")
