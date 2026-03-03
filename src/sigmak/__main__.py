@@ -51,7 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("yoy", help="Year-over-year risk analysis.")
+    yoy_parser = subparsers.add_parser("yoy", help="Year-over-year risk analysis.")
+    yoy_parser.add_argument(
+        "--years",
+        nargs="+",
+        type=int,
+        default=[2023, 2024, 2025],
+        metavar="YEAR",
+        help="Filing years to analyse (default: 2023 2024 2025).",
+    )
     subparsers.add_parser("peers", help="Peer comparison report.")
     subparsers.add_parser("download", help="Download SEC filings.")
     subparsers.add_parser("inspect", help="Inspect the local database.")
