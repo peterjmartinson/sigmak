@@ -117,8 +117,50 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Maximum number of peers to download when --include-peers is set (default: 6).",
     )
-    subparsers.add_parser("inspect", help="Inspect the local database.")
-    subparsers.add_parser("render", help="Render a Markdown report to PDF.")
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect the local database.")
+    inspect_parser.add_argument(
+        "--chroma-dir",
+        default="./database",
+        dest="chroma_dir",
+        metavar="PATH",
+        help="ChromaDB persistence directory (default: ./database).",
+    )
+    inspect_parser.add_argument(
+        "--max-sample",
+        type=int,
+        default=5,
+        dest="max_sample",
+        metavar="N",
+        help="Maximum sample rows per collection (default: 5).",
+    )
+
+    render_parser = subparsers.add_parser("render", help="Render a Markdown report to PDF.")
+    render_parser.add_argument(
+        "--input",
+        required=True,
+        dest="input_path",
+        metavar="PATH",
+        help="Input Markdown file to convert.",
+    )
+    render_parser.add_argument(
+        "--output",
+        default=None,
+        dest="output_path",
+        metavar="PATH",
+        help="Output PDF path (default: same stem as input).",
+    )
+    render_parser.add_argument(
+        "--css",
+        default="styles/report.css",
+        dest="css_path",
+        metavar="PATH",
+        help="CSS stylesheet for PDF styling (default: styles/report.css).",
+    )
+    render_parser.add_argument(
+        "--title",
+        default=None,
+        help="Document title (default: input filename stem).",
+    )
 
     return parser
 
