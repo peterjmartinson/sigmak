@@ -3123,3 +3123,30 @@ Requirements:
 ---
 
 > "A taxonomy is only as good as the prompts that enforce it." — Version control ensures prompt quality compounds over time.
+
+---
+
+## Issue #103 — Wire peers subcommand ($(date +%Y-%m-%d))
+
+### Summary
+Wired the `peers` subcommand so `uv run sigmak --ticker NVDA peers --year 2024`
+delegates to the full peer comparison logic.
+
+### Changes
+| File | Change |
+|---|---|
+| `tests/test_cli_peers.py` | New — 4 SRP unit tests |
+| `src/sigmak/reports/peer_report.py` | New — all business functions + `run_peer_comparison()` |
+| `src/sigmak/cli/peers.py` | Replaced stub with real delegate |
+| `src/sigmak/__main__.py` | Added `--year`, `--max-peers`, `--peers` to peers subparser |
+| `scripts/generate_peer_comparison_report.py` | `main()` body replaced; all function bodies kept |
+| `tests/test_main.py` | Fixed `test_peers_subcommand_registered` to include required `--year` |
+
+### Test Results
+20 tests passing (4 new + 16 regression).
+
+### Lessons
+- `--year` is `required=True` on the `peers` subparser, so any test calling `peers` bare
+  (without `--year`) must be updated.
+- Script function bodies must remain intact due to `importlib`-based dynamic loading
+  in `test_generate_peer_comparison_misfiled.py`.

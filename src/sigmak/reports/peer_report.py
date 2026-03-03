@@ -1,39 +1,40 @@
-#!/usr/bin/env python3
-"""Generate a Markdown peer comparison report for a target ticker and year.
+"""Library module: peer comparison report business logic.
 
-Behavior:
-- Loads downloaded 10-K HTML files from `data/filings/{TICKER}/{YEAR}`.
-- If a peer's filing for the requested year is missing, attempts to download it.
-- Runs the `IntegrationPipeline` analysis for each filing and computes simple
-  comparison metrics (average severity percentile, category divergence,
-  unique/shared risks).
-- Writes a Markdown report to `output/{TICKER}_Peer_Comparison_{YEAR}.md`.
-
-The script exits with an informative message if a required download fails.
+All public functions are extracted from
+``scripts/generate_peer_comparison_report.py`` so that the CLI layer
+(``sigmak.cli.peers``) can call ``run_peer_comparison()`` directly without
+going through argparse.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import sys
+from collections import Counter
 from pathlib import Path
 from statistics import mean, median
-import re
-from collections import Counter
 from typing import Any, Dict, List, Tuple
+import re
+
 from dotenv import load_dotenv
 
-from sigmak.integration import IntegrationPipeline, IntegrationError, RiskAnalysisResult
+from sigmak.integration import IntegrationError, IntegrationPipeline, RiskAnalysisResult
 from sigmak.text_utils import clean_text
-from sigmak.downloads.tenk_downloader import TenKDownloader, resolve_ticker_to_cik, fetch_company_submissions
+from sigmak.downloads.tenk_downloader import (
+    TenKDownloader,
+    fetch_company_submissions,
+    resolve_ticker_to_cik,
+)
 from sigmak.peer_discovery import PeerDiscoveryService
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env so GOOGLE_API_KEY is available
 load_dotenv()
 
+
+# ---------------------------------------------------------------------------
+# Business functions (mirrored from script — kept in sync manually)
+# ---------------------------------------------------------------------------
 
 def find_html_in_dir(dirpath: Path) -> Path | None:
     if not dirpath.exists():
@@ -46,20 +47,11 @@ def find_html_in_dir(dirpath: Path) -> Path | None:
 
 
 def locate_filing_html(ticker_dir: Path, year: int) -> Path | None:
-    """Locate an HTML filing for a ticker directory, tolerant of mis-filed years.
-
-    Search strategy (in order):
-    1. Exact year dir (e.g., ticker_dir / "2024/")
-    2. Any file under ticker_dir whose filename or parent dir name contains the year
-    3. Any HTML under ticker_dir whose content contains a filing date with the year
-    4. Most recently modified HTML under ticker_dir
-    """
-    # 1) exact year folder
+    """Locate an HTML filing for a ticker directory, tolerant of mis-filed years."""
     exact = find_html_in_dir(ticker_dir / str(year))
     if exact:
         return exact
 
-    # 2) filename or parent folder hint
     candidates: List[Path] = list(ticker_dir.rglob("*.htm")) + list(ticker_dir.rglob("*.html"))
     if not candidates:
         return None
@@ -67,9 +59,6 @@ def locate_filing_html(ticker_dir: Path, year: int) -> Path | None:
     for c in candidates:
         if str(year) in c.name or str(year) in str(c.parent.name):
             return c
-
-    # 3) inspect file contents for a date containing the year
-    import re
 
     date_re = re.compile(r"(\d{4})-\d{2}-\d{2}")
     for c in candidates:
@@ -81,22 +70,17 @@ def locate_filing_html(ticker_dir: Path, year: int) -> Path | None:
         if m and int(m.group(1)) == year:
             return c
 
-    # 4) fallback to most recently modified
     candidates = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
 
 
 def ensure_filing(downloader: TenKDownloader, ticker: str, year: int) -> Path:
-    """Ensure a 10-K HTML exists for ticker/year; download if missing.
-
-    Returns path to the HTML file or raises RuntimeError on failure.
-    """
+    """Ensure a 10-K HTML exists for ticker/year; download if missing."""
     ticker_dir = Path(downloader.download_dir) / ticker
     html = locate_filing_html(ticker_dir, year)
     if html:
         return html
 
-    # Attempt to locate filing via SEC submissions and download the requested year
     try:
         cik = resolve_ticker_to_cik(ticker)
     except ValueError as e:
@@ -115,11 +99,14 @@ def ensure_filing(downloader: TenKDownloader, ticker: str, year: int) -> Path:
     if not chosen:
         if filings:
             chosen = sorted(filings, key=lambda x: x.filing_date, reverse=True)[0]
-            logger.info("No exact-year 10-K for %s; falling back to most recent %s", ticker, chosen.filing_date)
+            logger.info(
+                "No exact-year 10-K for %s; falling back to most recent %s",
+                ticker,
+                chosen.filing_date,
+            )
         else:
             raise RuntimeError(f"No 10-K filings found for {ticker}")
 
-    # Record filing and download via downloader
     filing_id = downloader.db.insert_filing(chosen)
     try:
         downloader.download_filing(chosen, filing_id)
@@ -128,34 +115,22 @@ def ensure_filing(downloader: TenKDownloader, ticker: str, year: int) -> Path:
 
     html = find_html_in_dir(ticker_dir)
     if not html:
-        raise RuntimeError(f"Downloaded filing for {ticker} but no HTML found at {ticker_dir}")
+        raise RuntimeError(
+            f"Downloaded filing for {ticker} but no HTML found at {ticker_dir}"
+        )
     return html
 
 
 def validate_cached_result(data: Dict[str, Any]) -> Tuple[bool, str]:
-    """Validate that cached JSON has required fields.
-    
-    Args:
-        data: Loaded JSON data
-        
-    Returns:
-        Tuple of (is_valid, reason_if_invalid)
-    """
-    risks = data.get('risks', [])
+    """Validate that cached JSON has required fields."""
+    risks = data.get("risks", [])
     if not risks:
-        return True, ""  # Empty results are valid
-    
-    # Check for classification fields
-    missing_classification = False
-    
+        return True, ""
+
     for risk in risks:
-        if not risk.get('category'):
-            missing_classification = True
-            break
-    
-    if missing_classification:
-        return False, "missing risk classification"
-    
+        if not risk.get("category"):
+            return False, "missing risk classification"
+
     return True, ""
 
 
@@ -164,85 +139,76 @@ def load_or_analyze_with_cache(
     html_path: str,
     ticker: str,
     year: int,
-    retrieve_top_k: int = 100
+    retrieve_top_k: int = 100,
 ) -> RiskAnalysisResult:
-    """Load cached results or analyze filing fresh.
-    
-    Args:
-        pipeline: Integration pipeline instance
-        html_path: Path to HTML filing
-        ticker: Stock ticker symbol
-        year: Filing year
-        retrieve_top_k: Number of top risks to retrieve
-        
-    Returns:
-        RiskAnalysisResult with full risk analysis
-    """
+    """Load cached results or analyze filing fresh."""
     cache_file = Path(f"output/results_{ticker}_{year}.json")
-    
-    # Try to load from cache
+
     if cache_file.exists():
-        logger.info(f"Loading cached results for {ticker} {year}...")
+        logger.info("Loading cached results for %s %s...", ticker, year)
         try:
-            with open(cache_file, 'r') as f:
+            with open(cache_file, "r") as f:
                 data = json.load(f)
-                
-                # Validate cached results
-                is_valid, reason = validate_cached_result(data)
-                
-                if is_valid:
-                    logger.info(f"✅ Using cached results for {ticker} {year}")
-                    return RiskAnalysisResult(
-                        ticker=data['ticker'],
-                        filing_year=data['filing_year'],
-                        risks=data['risks'],
-                        metadata=data['metadata']
-                    )
-                else:
-                    logger.warning(f"Cached results for {ticker} {year} incomplete ({reason}); re-analyzing...")
+
+            is_valid, reason = validate_cached_result(data)
+            if is_valid:
+                logger.info("✅ Using cached results for %s %s", ticker, year)
+                return RiskAnalysisResult(
+                    ticker=data["ticker"],
+                    filing_year=data["filing_year"],
+                    risks=data["risks"],
+                    metadata=data["metadata"],
+                )
+            else:
+                logger.warning(
+                    "Cached results for %s %s incomplete (%s); re-analyzing...",
+                    ticker,
+                    year,
+                    reason,
+                )
         except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"Failed to load cache for {ticker} {year}: {e}; re-analyzing...")
-    
-    # Analyze fresh if no cache or invalid cache
-    logger.info(f"Analyzing {ticker} {year} from {html_path}...")
+            logger.warning(
+                "Failed to load cache for %s %s: %s; re-analyzing...", ticker, year, e
+            )
+
+    logger.info("Analyzing %s %s from %s...", ticker, year, html_path)
     result = pipeline.analyze_filing(
         html_path=html_path,
         ticker=ticker,
         filing_year=year,
         retrieve_top_k=retrieve_top_k,
-        rerank=True
+        rerank=True,
     )
-    
-    # Cache results
+
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(cache_file, 'w') as f:
+    with open(cache_file, "w") as f:
         f.write(result.to_json())
-    logger.info(f"💾 Cached results to {cache_file}")
-    
+    logger.info("💾 Cached results to %s", cache_file)
+
     return result
 
 
 def filter_boilerplate(result: RiskAnalysisResult) -> RiskAnalysisResult:
-    """Filter out BOILERPLATE category risks (TOC, headers, metadata).
-    
-    Args:
-        result: Risk analysis result
-        
-    Returns:
-        New RiskAnalysisResult with boilerplate risks removed
-    """
+    """Filter out BOILERPLATE category risks."""
     original_count = len(result.risks)
-    filtered_risks = [r for r in result.risks if r.get('category', '').lower() != 'boilerplate']
+    filtered_risks = [
+        r for r in result.risks if r.get("category", "").lower() != "boilerplate"
+    ]
     filtered_count = original_count - len(filtered_risks)
-    
+
     if filtered_count > 0:
-        logger.info(f"Filtered {filtered_count} BOILERPLATE chunks from {result.ticker} {result.filing_year}")
-    
+        logger.info(
+            "Filtered %d BOILERPLATE chunks from %s %s",
+            filtered_count,
+            result.ticker,
+            result.filing_year,
+        )
+
     return RiskAnalysisResult(
         ticker=result.ticker,
         filing_year=result.filing_year,
         risks=filtered_risks,
-        metadata=result.metadata
+        metadata=result.metadata,
     )
 
 
@@ -260,11 +226,15 @@ def compute_category_distribution(result: RiskAnalysisResult) -> Dict[str, float
     return {k: v / total for k, v in counts.items()}
 
 
-def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisResult], outpath: Path) -> None:
-    # Filter out BOILERPLATE risks from all results
+def generate_markdown_report(
+    target: str,
+    year: int,
+    results: List[RiskAnalysisResult],
+    outpath: Path,
+) -> None:
     target_result = next(r for r in results if r.ticker.upper() == target.upper())
     target_result = filter_boilerplate(target_result)
-    
+
     peer_results = [r for r in results if r.ticker.upper() != target.upper()]
     peer_results = [filter_boilerplate(r) for r in peer_results]
 
@@ -274,11 +244,8 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     lines.append("## Summary")
     lines.append("")
 
-    # Severity percentiles
     target_sev = compute_severity_avg(target_result)
     peer_sevs = [compute_severity_avg(r) for r in peer_results]
-    all_sevs = peer_sevs + [target_sev]
-    # percentile
     higher = sum(1 for v in peer_sevs if v < target_sev)
     pct = (higher / max(1, len(peer_sevs))) * 100 if peer_sevs else 100.0
 
@@ -286,7 +253,6 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     lines.append(f"**Severity percentile vs peers:** {pct:.0f}th")
     lines.append("")
 
-    # Category divergence (simple top categories)
     target_dist = compute_category_distribution(target_result)
     lines.append("## Category Distribution (Target)")
     lines.append("")
@@ -294,7 +260,6 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
         lines.append(f"- {cat}: {pctv*100:.1f}%")
     lines.append("")
 
-    # List companies compared with (peers)
     lines.append("## Compared Companies")
     lines.append("")
     if peer_results:
@@ -304,25 +269,24 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
         lines.append("- (no peers analyzed)")
     lines.append("")
 
-    # Unique / Shared risks (token-overlap Jaccard matching)
     SHARED_THRESHOLD = 0.35
 
-    def tokenize(s: str):
+    def tokenize(s: str) -> set[str]:
         return set(re.findall(r"\w+", (s or "").lower()))
 
     target_risks = [clean_text(r.get("text", "")) for r in target_result.risks]
-    peer_risks = []
+    peer_risks: List[Tuple[str, str]] = []
     for pr in peer_results:
         for r in pr.risks:
             peer_risks.append((pr.ticker.upper(), clean_text(r.get("text", ""))))
 
-    unique_previews = []
-    shared_entries = []
+    unique_previews: List[str] = []
+    shared_entries: List[Dict[str, Any]] = []
 
     for t in target_risks:
         t_tokens = tokenize(t)
         best_score = 0.0
-        best_peer = None
+        best_peer: str | None = None
         best_peer_text = ""
         for peer_ticker, ptext in peer_risks:
             p_tokens = tokenize(ptext)
@@ -338,12 +302,14 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
                 best_peer_text = ptext
 
         if best_score >= SHARED_THRESHOLD:
-            shared_entries.append({
-                "target_preview": (t or "").strip()[:200],
-                "peer": best_peer,
-                "peer_preview": (best_peer_text or "").strip()[:200],
-                "score": best_score,
-            })
+            shared_entries.append(
+                {
+                    "target_preview": (t or "").strip()[:200],
+                    "peer": best_peer,
+                    "peer_preview": (best_peer_text or "").strip()[:200],
+                    "score": best_score,
+                }
+            )
         else:
             unique_previews.append((t or "").strip()[:200])
 
@@ -357,39 +323,36 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     lines.append("")
     if shared_entries:
         for s in sorted(shared_entries, key=lambda x: -x["score"])[:20]:
-            lines.append(f"- {s['target_preview']}  — shared with **{s['peer']}** (score {s['score']:.3f})")
-            if s['peer_preview']:
+            lines.append(
+                f"- {s['target_preview']}  — shared with **{s['peer']}** (score {s['score']:.3f})"
+            )
+            if s["peer_preview"]:
                 lines.append(f"  - peer snippet: {s['peer_preview']}")
     else:
         lines.append("- (no shared risks detected at current threshold)")
     lines.append("")
 
-    # defer writing file until all sections are appended (specific comparisons + histogram)
-
-    # --- Additional comparisons requested in ISSUE #82
-    # Aggregate texts
     def normalize_text(s: str) -> str:
-        # Use the central cleaner then collapse whitespace
         return clean_text(s)
 
-    def sentences(text: str):
-        # naive sentence split
+    def sentences(text: str) -> List[str]:
         s = re.split(r"(?<=[.!?])\s+", text)
         return [re.sub(r"[^\w\s]", "", x).strip().lower() for x in s if x.strip()]
 
-    def words(text: str):
+    def words(text: str) -> List[str]:
         return re.findall(r"\w+", text.lower())
 
-    company_texts = {r.ticker.upper(): "\n".join([clean_text(k.get("text", "")) for k in r.risks]) for r in results}
+    company_texts = {
+        r.ticker.upper(): "\n".join([clean_text(k.get("text", "")) for k in r.risks])
+        for r in results
+    }
 
     target_text = company_texts.get(target.upper(), "")
 
-    # 1) Textual Novelty (Year-over-Year)
     prior_path = Path(f"output/results_{target}_{year-1}.json")
     novelty_line = "Textual novelty: N/A (prior year not available)"
     if prior_path.exists():
         try:
-            import json
             prev = json.loads(prior_path.read_text())
             prev_text = "\n".join([r.get("text", "") for r in prev.get("risks", [])])
             cur_sents = set(sentences(target_text))
@@ -397,7 +360,10 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
             if cur_sents:
                 new = cur_sents - prev_sents
                 pct_new = (len(new) / len(cur_sents)) * 100.0
-                novelty_line = f"Textual novelty (YoY): {pct_new:.1f}% new sentences ({len(new)} of {len(cur_sents)})"
+                novelty_line = (
+                    f"Textual novelty (YoY): {pct_new:.1f}% new sentences "
+                    f"({len(new)} of {len(cur_sents)})"
+                )
             else:
                 novelty_line = "Textual novelty: no sentences detected in current filing"
         except Exception:
@@ -407,37 +373,36 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     lines.append("")
     lines.append(f"- **{novelty_line}**")
 
-    # 2) Peer Similarity Score (Jaccard + Cosine)
-    # Build simple token sets and TF vectors
     all_companies = list(company_texts.keys())
     token_sets = {c: set(words(company_texts[c])) for c in all_companies}
-    def jaccard(a: set, b: set) -> float:
+
+    def jaccard(a: set[str], b: set[str]) -> float:
         if not a and not b:
             return 1.0
         inter = len(a & b)
         uni = len(a | b)
         return inter / uni if uni else 0.0
 
-    peer_scores = []
-    peer_texts = [company_texts[c] for c in all_companies if c != target.upper()]
+    peer_scores: List[float] = []
     peer_tokens = [token_sets[c] for c in all_companies if c != target.upper()]
 
-    # target vs peer average (Jaccard)
     for pt in peer_tokens:
         peer_scores.append(jaccard(token_sets.get(target.upper(), set()), pt))
 
     if peer_scores:
         avg_jaccard = sum(peer_scores) / len(peer_scores)
-        lines.append(f"- **Peer similarity (avg Jaccard):** {avg_jaccard:.3f} — lower means more company-specific")
+        lines.append(
+            f"- **Peer similarity (avg Jaccard):** {avg_jaccard:.3f} — lower means more company-specific"
+        )
     else:
-        lines.append(f"- **Peer similarity (avg Jaccard):** N/A (no peers analyzed)")
+        avg_jaccard = 0.0
+        lines.append("- **Peer similarity (avg Jaccard):** N/A (no peers analyzed)")
 
-    # 3) Risk Density & Volume (word count, paragraph count)
-    def paragraphs(text: str):
-        paras = [p.strip() for p in text.split('\n') if p.strip()]
+    def paragraphs(text: str) -> List[str]:
+        paras = [p.strip() for p in text.split("\n") if p.strip()]
         return paras
 
-    stats = {}
+    stats: Dict[str, Dict[str, int]] = {}
     for c, txt in company_texts.items():
         w = words(txt)
         p = paragraphs(txt)
@@ -448,38 +413,55 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     tgt_words = stats.get(target.upper(), {}).get("words", 0)
     tgt_paras = stats.get(target.upper(), {}).get("paras", 0)
 
+    med_words: float = 0.0
+    med_paras: float = 0.0
     if peer_words:
         med_words = median(peer_words)
         med_paras = median(peer_paras)
-        lines.append(f"- **Risk density & volume:** target words={tgt_words}, peers median words={med_words}; target paras={tgt_paras}, peers median paras={med_paras}")
+        lines.append(
+            f"- **Risk density & volume:** target words={tgt_words}, "
+            f"peers median words={med_words}; target paras={tgt_paras}, "
+            f"peers median paras={med_paras}"
+        )
     else:
-        lines.append(f"- **Risk density & volume:** target words={tgt_words}, paras={tgt_paras} (no peers)")
+        lines.append(
+            f"- **Risk density & volume:** target words={tgt_words}, paras={tgt_paras} (no peers)"
+        )
 
-    # 4) Linguistic Tone (keyword density per 1k words)
-    risk_keywords = ["litigation", "volatility", "uncertainty", "adverse", "risk", "loss", "decline", "regulatory", "compliance"]
-    tone = {}
+    risk_keywords = [
+        "litigation", "volatility", "uncertainty", "adverse", "risk",
+        "loss", "decline", "regulatory", "compliance",
+    ]
+    tone: Dict[str, Dict[str, float]] = {}
     for c, txt in company_texts.items():
         w = words(txt)
         cnt = sum(1 for t in w if t in risk_keywords)
         per_k = (cnt / max(1, len(w))) * 1000
-        tone[c] = {"count": cnt, "per_k": per_k}
+        tone[c] = {"count": float(cnt), "per_k": per_k}
 
-    tgt_tone = tone.get(target.upper(), {"count": 0, "per_k": 0})
+    tgt_tone = tone.get(target.upper(), {"count": 0.0, "per_k": 0.0})
+    med_perk: float = 0.0
     if peer_words:
         peer_perks = [tone[c]["per_k"] for c in tone if c != target.upper()]
         med_perk = median(peer_perks) if peer_perks else 0.0
-        lines.append(f"- **Linguistic tone (risk keywords/1k words):** target={tgt_tone['per_k']:.2f}, peers median={med_perk:.2f}")
+        lines.append(
+            f"- **Linguistic tone (risk keywords/1k words):** "
+            f"target={tgt_tone['per_k']:.2f}, peers median={med_perk:.2f}"
+        )
     else:
-        lines.append(f"- **Linguistic tone (risk keywords/1k words):** target={tgt_tone['per_k']:.2f} (no peers)")
+        lines.append(
+            f"- **Linguistic tone (risk keywords/1k words):** target={tgt_tone['per_k']:.2f} (no peers)"
+        )
 
-    # append final note
     lines.append("")
-    lines.append("*End of specific comparisons — computed with simple token-based metrics (see ISSUE #82 for desired refinements).*")
+    lines.append(
+        "*End of specific comparisons — computed with simple token-based metrics "
+        "(see ISSUE #82 for desired refinements).*"
+    )
 
-    # --- Histogram of pairwise Jaccard scores (target risk snippets vs peer snippets)
-    # Build score list using the same tokenize() helper above
+    pair_scores: List[float] = []
+    bins: List[int] = [0] * 10
     try:
-        pair_scores: List[float] = []
         for t in target_risks:
             t_tokens = tokenize(t)
             for peer_ticker, ptext in peer_risks:
@@ -492,8 +474,6 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
                     score = inter / uni if uni else 0.0
                 pair_scores.append(score)
 
-        # create 10 bins (0.0-0.1, 0.1-0.2, ... 0.9-1.0)
-        bins = [0] * 10
         for s in pair_scores:
             idx = min(int(s * 10), 9)
             bins[idx] += 1
@@ -507,28 +487,22 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
                 lo = i / 10.0
                 hi = (i + 1) / 10.0
                 barlen = int((count / total) * max_bar)
-                bar = '#' * barlen
-                lines.append(f"- {lo:.1f}-{hi:.1f}: {count} {' ' if count<10 else ''}{bar}")
+                bar = "#" * barlen
+                lines.append(f"- {lo:.1f}-{hi:.1f}: {count} {' ' if count < 10 else ''}{bar}")
             lines.append("")
         else:
             lines.append("- No pairwise scores available (insufficient data)")
             lines.append("")
     except Exception:
-        # don't fail report generation if histogram errors
         lines.append("")
         lines.append("- Jaccard histogram: error computing histogram")
         lines.append("")
 
-    # finally write the completed Markdown report
     outpath.parent.mkdir(parents=True, exist_ok=True)
     outpath.write_text("\n".join(lines), encoding="utf-8")
 
-    # Also emit a machine-readable YAML artifact alongside the Markdown so
-    # downstream consumers can parse reports deterministically.
     yaml_path = outpath.with_suffix(".yaml")
-
-    # Build structured data matching the key sections above
-    data = {
+    data: Dict[str, Any] = {
         "ticker": target.upper(),
         "year": int(year),
         "summary": {
@@ -537,7 +511,7 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
         },
         "category_distribution": {k: float(v) for k, v in target_dist.items()},
         "compared_companies": [pr.ticker.upper() for pr in peer_results],
-        "unique_risks": [u for u in unique_previews],
+        "unique_risks": list(unique_previews),
         "shared_risks": [
             {
                 "target_preview": s["target_preview"],
@@ -564,10 +538,9 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
         "jaccard_histogram": {},
     }
 
-    # populate histogram mapping using the bins computed above (if present)
     try:
         if pair_scores:
-            total = len(pair_scores)
+            total_ps = len(pair_scores)
             for i, count in enumerate(bins):
                 lo = i / 10.0
                 hi = (i + 1) / 10.0
@@ -578,84 +551,145 @@ def generate_markdown_report(target: str, year: int, results: List[RiskAnalysisR
     except Exception:
         data["jaccard_histogram"] = {}
 
-    # Try to use PyYAML if available, otherwise emit a simple YAML serializer
     try:
         import yaml
 
         with yaml_path.open("w", encoding="utf-8") as fh:
-            # allow_unicode ensures characters like bullets and non-ASCII
-            # punctuation are written as Unicode rather than \x escapes.
             yaml.safe_dump(data, fh, sort_keys=False, allow_unicode=True)
     except Exception:
-        def _dump_yaml(obj, indent=0):
+
+        def _dump_yaml(obj: Any, indent: int = 0) -> str:
             pad = "  " * indent
             if isinstance(obj, dict):
-                lines = []
+                out: List[str] = []
                 for k, v in obj.items():
                     if isinstance(v, (dict, list)):
-                        lines.append(f"{pad}{k}:")
-                        lines.append(_dump_yaml(v, indent + 1))
+                        out.append(f"{pad}{k}:")
+                        out.append(_dump_yaml(v, indent + 1))
                     else:
                         if v is None:
-                            lines.append(f"{pad}{k}: null")
+                            out.append(f"{pad}{k}: null")
                         elif isinstance(v, bool):
-                            lines.append(f"{pad}{k}: {str(v).lower()}")
+                            out.append(f"{pad}{k}: {str(v).lower()}")
                         elif isinstance(v, (int, float)):
-                            lines.append(f"{pad}{k}: {v}")
+                            out.append(f"{pad}{k}: {v}")
                         else:
                             sval = str(v)
                             if "\n" in sval:
-                                # block literal for multi-line
-                                block = "\n".join([f"{pad}  {l}" for l in sval.splitlines()])
-                                lines.append(f"{pad}{k}: |")
-                                lines.append(block)
+                                block = "\n".join(
+                                    [f"{pad}  {line}" for line in sval.splitlines()]
+                                )
+                                out.append(f"{pad}{k}: |")
+                                out.append(block)
                             else:
-                                # simple scalar (escape leading/trailing spaces)
-                                lines.append(f"{pad}{k}: {sval}")
-                return "\n".join(lines)
+                                out.append(f"{pad}{k}: {sval}")
+                return "\n".join(out)
             elif isinstance(obj, list):
-                lines = []
+                out2: List[str] = []
                 for it in obj:
                     if isinstance(it, (dict, list)):
-                        lines.append(f"{pad}- ")
-                        lines.append(_dump_yaml(it, indent + 1))
+                        out2.append(f"{pad}- ")
+                        out2.append(_dump_yaml(it, indent + 1))
                     else:
-                        lines.append(f"{pad}- {it}")
-                return "\n".join(lines)
+                        out2.append(f"{pad}- {it}")
+                return "\n".join(out2)
             else:
                 return f"{pad}{obj}\n"
 
         yaml_path.write_text(_dump_yaml(data), encoding="utf-8")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate a peer comparison report")
-    parser.add_argument("ticker", help="Target ticker (e.g., NVDA)")
-    parser.add_argument("year", type=int, help="Target filing year (e.g., 2024)")
-    parser.add_argument("--peers", nargs="+", help="Explicit peer tickers (optional)")
-    parser.add_argument("--max-peers", type=int, default=6, help="Max peers to include")
-    parser.add_argument("--download-dir", type=str, default="./data/filings", help="Base download dir")
-    parser.add_argument("--db-path", type=str, default="./database/sec_filings.db", help="Filings DB path")
-    parser.add_argument("--output", type=str, default=None, help="Output markdown path (default: output/{TICKER}_Peer_Comparison_{YEAR}.md)")
-    parser.add_argument("--db-only-classification", action="store_true", help="Use DB-only classification (no LLM calls)")
-    parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
-    args = parser.parse_args()
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+def run_peer_comparison(
+    ticker: str,
+    year: int,
+    max_peers: int,
+    explicit_peers: List[str] | None,
+    db_only: bool,
+    db_path: str = "./database/sec_filings.db",
+    download_dir: str = "./data/filings",
+) -> None:
+    """Run a peer comparison report and write Markdown + YAML to ``output/``.
 
-    from sigmak.reports.peer_report import run_peer_comparison
+    Parameters
+    ----------
+    ticker:      Target company ticker symbol.
+    year:        Filing year to analyse.
+    max_peers:   Maximum number of peers to include in the report.
+    explicit_peers:
+                 If provided, use these tickers as the peer list instead of
+                 auto-discovery.
+    db_only:     When True, skip LLM classification and use ChromaDB only.
+    db_path:     Path to the SQLite filings database.
+    download_dir:
+                 Base directory where 10-K HTML files are stored.
+    """
+    persist_dir = str(Path(db_path).parent)
 
-    run_peer_comparison(
-        ticker=args.ticker.upper(),
-        year=args.year,
-        max_peers=args.max_peers,
-        explicit_peers=args.peers,
-        db_only=bool(args.db_only_classification),
-        db_path=args.db_path,
-        download_dir=args.download_dir,
+    downloader = TenKDownloader(db_path=db_path, download_dir=download_dir)
+    svc = PeerDiscoveryService(db_path=db_path)
+
+    pipeline = IntegrationPipeline(
+        persist_path=persist_dir,
+        db_only_classification=db_only,
     )
-    sys.exit(0)
 
+    target = ticker.upper()
 
-if __name__ == "__main__":
-    main()
+    try:
+        target_html = ensure_filing(downloader, target, year)
+    except RuntimeError as e:
+        logger.error("Failed to ensure filing for target %s: %s", target, e)
+        sys.exit(2)
+
+    try:
+        target_result = load_or_analyze_with_cache(
+            pipeline, str(target_html), target, year
+        )
+    except IntegrationError as e:
+        logger.error("Analysis failed for target %s: %s", target, e)
+        sys.exit(3)
+
+    desired = max_peers
+    collected: List[RiskAnalysisResult] = []
+    attempted: set[str] = set()
+
+    if explicit_peers:
+        candidates = [p.upper() for p in explicit_peers if p.upper() != target]
+    else:
+        candidates = svc.find_peers_for_ticker(target, top_n=max(desired * 3, desired + 6))
+
+    for cand in candidates:
+        if len(collected) >= desired:
+            break
+        cand_u = cand.upper()
+        if cand_u == target:
+            continue
+        if cand_u in attempted:
+            continue
+        attempted.add(cand_u)
+
+        try:
+            html_path = ensure_filing(downloader, cand_u, year)
+        except RuntimeError as e:
+            logger.warning(
+                "Could not obtain filing for peer %s: %s — trying next candidate",
+                cand_u,
+                e,
+            )
+            continue
+
+        try:
+            res = load_or_analyze_with_cache(pipeline, str(html_path), cand_u, year)
+            collected.append(res)
+        except IntegrationError as e:
+            logger.warning("Analysis failed for peer %s: %s — skipping", cand_u, e)
+            continue
+
+    results = [target_result] + collected
+    outpath = Path("output") / f"{target}_Peer_Comparison_{year}.md"
+    generate_markdown_report(target, year, results, outpath)
+    print(f"Wrote report: {outpath}")
