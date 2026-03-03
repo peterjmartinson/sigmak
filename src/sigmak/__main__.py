@@ -1,0 +1,98 @@
+"""
+Entry point for `uv run sigmak` / `python -m sigmak`.
+
+Usage
+-----
+    uv run sigmak --ticker AAPL yoy
+    uv run sigmak --ticker AAPL peers
+    uv run sigmak --ticker AAPL download
+    uv run sigmak --ticker AAPL inspect
+    uv run sigmak --ticker AAPL render --input output/AAPL_YoY.md
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return the top-level argument parser.
+
+    This is a standalone function so it can be imported and tested without
+    running main().
+    """
+    parser = argparse.ArgumentParser(
+        prog="sigmak",
+        description="Proprietary Risk Scoring CLI for SEC 10-K/Q filings.",
+    )
+
+    # --ticker is a required global flag
+    parser.add_argument(
+        "--ticker",
+        required=True,
+        metavar="TICKER",
+        help="Target company ticker symbol (required).",
+    )
+
+    # --use-llm / --db-only are mutually exclusive global flags
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--use-llm",
+        action="store_true",
+        default=False,
+        help="Use LLM for classification (requires GOOGLE_API_KEY).",
+    )
+    mode_group.add_argument(
+        "--db-only",
+        action="store_true",
+        default=False,
+        help="Use ChromaDB only; no LLM calls.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    subparsers.add_parser("yoy", help="Year-over-year risk analysis.")
+    subparsers.add_parser("peers", help="Peer comparison report.")
+    subparsers.add_parser("download", help="Download SEC filings.")
+    subparsers.add_parser("inspect", help="Inspect the local database.")
+    subparsers.add_parser("render", help="Render a Markdown report to PDF.")
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Parse arguments and dispatch to the appropriate CLI module.
+
+    Parameters
+    ----------
+    argv:
+        Argument list to parse. Defaults to sys.argv[1:] when None.
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(0)
+
+    kwargs = vars(args)
+
+    if args.command == "yoy":
+        from sigmak.cli.yoy import run
+        run(**kwargs)
+    elif args.command == "peers":
+        from sigmak.cli.peers import run
+        run(**kwargs)
+    elif args.command == "download":
+        from sigmak.cli.download import run
+        run(**kwargs)
+    elif args.command == "inspect":
+        from sigmak.cli.inspect_db import run
+        run(**kwargs)
+    elif args.command == "render":
+        from sigmak.cli.render import run
+        run(**kwargs)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,3 +1,39 @@
+## [2026-03-03] Issue 101: CLI Entry Point Scaffold
+
+### Status: COMPLETE ✓
+
+### Summary
+Wired up `uv run sigmak` as a real installed command. No business logic changed; scripts/ is untouched. Created the CLI walking skeleton: `argparse`-based `build_parser()` / `main()` in `src/sigmak/__main__.py`, an empty `src/sigmak/cli/` subpackage, five stub subcommand modules (`yoy`, `peers`, `download`, `inspect`, `render`), a `[project.scripts]` entry in `pyproject.toml`, and 11 unit tests written test-first.
+
+### What I changed
+
+**New files**
+- `src/sigmak/__main__.py` — `build_parser()` + `main(argv)` with `argparse`; required `--ticker`; mutually exclusive `--use-llm` / `--db-only`; five registered subcommands; lazily dispatches to `sigmak.cli.*`
+- `src/sigmak/cli/__init__.py` — empty package marker
+- `src/sigmak/cli/yoy.py` — stub `run(**kwargs)`
+- `src/sigmak/cli/peers.py` — stub `run(**kwargs)`
+- `src/sigmak/cli/download.py` — stub `run(**kwargs)`
+- `src/sigmak/cli/inspect_db.py` — stub `run(**kwargs)`
+- `src/sigmak/cli/render.py` — stub `run(**kwargs)`
+- `tests/test_main.py` — 11 unit tests, one behavior each (TDD)
+
+**Modified files**
+- `pyproject.toml` — added `[project.scripts]` section: `sigmak = "sigmak.__main__:main"`
+- `README.md` — added "CLI Usage" section near top
+
+### Test results
+```
+11 passed in 0.06s
+```
+
+### Verification
+```
+uv run sigmak --ticker AAPL          # prints help, exits 0
+uv run sigmak --ticker AAPL yoy      # prints "not yet implemented", exits 0
+```
+
+---
+
 ## [2026-02-20] Add yfinance Peer Discovery Adapter (opt-in)
 
 ### Status: COMPLETE ✓
