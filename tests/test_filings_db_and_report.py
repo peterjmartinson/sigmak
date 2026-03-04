@@ -46,19 +46,8 @@ def test_missing_identifiers_return_fallback_and_log(tmp_path):
 
 def test_load_filing_provenance_uses_db_first(tmp_path):
     """Test that load_filing_provenance retrieves from SQLite before falling back to JSON."""
-    import sys
-    import importlib.util
-    
-    # Dynamically load the report module to avoid heavy imports
-    script_path = Path(__file__).parent.parent / "scripts" / "generate_yoy_report.py"
-    spec = importlib.util.spec_from_file_location("report_module", script_path)
-    if not spec or not spec.loader:
-        pytest.skip("Cannot load generate_yoy_report.py for testing")
-    
-    report_module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = report_module
-    spec.loader.exec_module(report_module)
-    
+    from sigmak.reports.yoy_report import load_filing_provenance
+
     db_file = tmp_path / "filings.db"
     
     # Insert a filing row
@@ -66,7 +55,7 @@ def test_load_filing_provenance_uses_db_first(tmp_path):
                   "/Archives/edgar/data/000999/ACC-12345.htm", "2025-02-15")
     
     # Call load_filing_provenance with the test DB path
-    prov = report_module.load_filing_provenance("FOO", 2025, filings_db_path=str(db_file))
+    prov = load_filing_provenance("FOO", 2025, filings_db_path=str(db_file))
     
     assert prov["accession"] == "ACC-12345"
     assert prov["cik"] == "000999"
