@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2025 Peter Martinson, Distracted Fortune. All rights reserved.
 # This software is proprietary and not licensed for use, modification, or distribution.
+# DEPRECATED: use 'uv run sigmak render --input FILE' instead
 
 """
 Simple, easy-to-read Markdown → PDF converter using WeasyPrint.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# DEPRECATED: use 'uv run sigmak peer-marketcap --ticker TICKER...' or '--all' instead
 """Populate market_cap for peers in `database/sec_filings.db`.
 
 This script now delegates to ``sigmak.cli.peer_marketcap.run``.
