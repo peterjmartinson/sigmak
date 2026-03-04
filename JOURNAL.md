@@ -1,3 +1,45 @@
+## [2026-03-04] Issue 106: Deprecate /scripts
+
+### Status: COMPLETE ✓
+
+### Summary
+Converted all scripts to thin deprecated wrappers (or deleted dev artifacts). Stripped 2,356 lines of orphaned dead code — business logic that was already migrated to `src/sigmak/` but never removed from the scripts. All `python scripts/...` references in README replaced with `uv run sigmak ...`. 7 syntax-check tests written first (TDD). Zero regressions.
+
+### What I changed
+
+**Stripped + deprecated** (slim shim + `# DEPRECATED` notice):
+
+| Script | Before | After | Delegates to |
+|---|---|---|---|
+| `generate_yoy_report.py` | 1239 lines | 55 lines | `sigmak.reports.yoy_report.run_yoy_analysis` |
+| `generate_peer_comparison_report.py` | 662 lines | 55 lines | `sigmak.reports.peer_report.run_peer_comparison` |
+| `download_peers_and_target.py` | 200 lines | 54 lines | `sigmak.cli.download.run` |
+| `inspect_chroma.py` | 160 lines | 37 lines | `sigmak.cli.inspect_db.run` |
+| `backfill_llm_cache_to_chroma.py` | (already slim) | +1 notice line | `sigmak.cli.backfill.run` |
+| `md_to_pdf.py` | (already slim) | +1 notice line | `sigmak.cli.render.run` |
+| `populate_peer_marketcap.py` | (already slim) | +1 notice line | `sigmak.cli.peer_marketcap.run` |
+
+**Deleted** (dev artifacts; no tests import them):
+- `scripts/analyze_filing.py`
+- `scripts/batch_analyze_tesla.py`
+- `scripts/demo_peer_discovery.py`
+
+**New files**
+- `tests/test_scripts_deprecated.py` — 7 `py_compile` syntax checks (TDD)
+
+**Modified files**
+- `README.md` — all `uv run python scripts/backfill_llm_cache_to_chroma.py` and `uv run python scripts/generate_yoy_report.py` replaced with `uv run sigmak backfill` / `uv run sigmak yoy`
+- `styles/README.md` — `python scripts/md_to_pdf.py` replaced with `uv run sigmak render`
+
+### Test results
+```
+20 passed in 0.08s
+tests/test_scripts_deprecated.py — 7 syntax checks all green
+tests/test_main.py — 13 existing tests all green
+```
+
+---
+
 ## [2026-03-04] Issue 118: Wire peer-marketcap CLI Subcommand
 
 ### Status: COMPLETE ✓
