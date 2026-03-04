@@ -14,6 +14,8 @@ uv run sigmak yoy --ticker AAPL --years 2023 2024 2025
 uv run sigmak peers --ticker AAPL --year 2024
 uv run sigmak download --ticker AAPL
 uv run sigmak analyze --ticker TSLA --year 2024 --html-path data/filings/tsla_2024_10k.htm
+uv run sigmak backfill --dry-run
+uv run sigmak backfill --write --output-dir ./output
 uv run sigmak inspect
 uv run sigmak render --input output/AAPL_YoY.md
 ```
@@ -34,6 +36,14 @@ Each subcommand owns its own flags. Common per-subcommand flags:
 --output-dir PATH     Output directory for JSON results (default: ./output)
 --use-llm             Enable LLM classification
 --db-only             Vector-DB-only classification
+```
+
+`backfill` flags:
+```
+--write               Persist results to SQLite and ChromaDB
+--dry-run             Preview changes without writing (default if neither given)
+--output-dir PATH     Directory containing results_*.json (default: ./output)
+--db-path PATH        SQLite database path (default: from config.yaml)
 ```
 
 
