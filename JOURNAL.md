@@ -1,3 +1,37 @@
+## [2026-03-04] Issue 118: Wire peer-marketcap CLI Subcommand
+
+### Status: COMPLETE ✓
+
+### Summary
+Wired the `peer-marketcap` subcommand so `uv run sigmak peer-marketcap --ticker AAPL MSFT` or `--all` fetches market-cap data from yfinance and writes it back to the SQLite peers table. Delegates to the existing `filings_db.populate_market_cap()` — no new library module needed. 4 tests written first (TDD). Zero regressions across 17 tests.
+
+### What I changed
+
+**New files**
+- `src/sigmak/cli/peer_marketcap.py` — `run(tickers, all_peers, delay, db_path, **_)` handler
+- `tests/test_cli_peer_marketcap.py` — 4 unit tests (TDD)
+
+**Modified files**
+- `src/sigmak/__main__.py` — added `peer-marketcap` subparser (`--ticker` nargs=+ XOR `--all`, mutually exclusive + required; `--delay`, `--db-path`); dispatch branch added
+- `scripts/populate_peer_marketcap.py` — replaced full implementation with thin wrapper delegating to `cli.peer_marketcap.run()`; converts legacy comma-separated `--tickers` to list
+
+### Design decisions
+- `--ticker TICKER [TICKER ...]` (`nargs="+"`) replaces the legacy comma-separated `--tickers`; script wrapper converts for backward compat
+- `required=True` on the mutually exclusive group — argparse enforces one of `--ticker`/`--all` without any manual check in `run()`
+- `ImportError` from missing yfinance → `sys.exit(2)` (mirrors old script)
+
+### Test results
+```
+17 passed in 0.10s
+tests/test_cli_peer_marketcap.py::test_peer_marketcap_dispatch_ticker PASSED
+tests/test_cli_peer_marketcap.py::test_peer_marketcap_dispatch_all PASSED
+tests/test_cli_peer_marketcap.py::test_peer_marketcap_delay_forwarded PASSED
+tests/test_cli_peer_marketcap.py::test_peer_marketcap_no_ticker_required PASSED
+tests/test_main.py — 13 existing tests all green
+```
+
+---
+
 ## [2026-03-04] Issue 117: Wire backfill CLI Subcommand
 
 ### Status: COMPLETE ✓

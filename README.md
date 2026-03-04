@@ -16,6 +16,8 @@ uv run sigmak download --ticker AAPL
 uv run sigmak analyze --ticker TSLA --year 2024 --html-path data/filings/tsla_2024_10k.htm
 uv run sigmak backfill --dry-run
 uv run sigmak backfill --write --output-dir ./output
+uv run sigmak peer-marketcap --ticker AAPL MSFT
+uv run sigmak peer-marketcap --all
 uv run sigmak inspect
 uv run sigmak render --input output/AAPL_YoY.md
 ```
@@ -44,6 +46,14 @@ Each subcommand owns its own flags. Common per-subcommand flags:
 --dry-run             Preview changes without writing (default if neither given)
 --output-dir PATH     Directory containing results_*.json (default: ./output)
 --db-path PATH        SQLite database path (default: from config.yaml)
+```
+
+`peer-marketcap` flags:
+```
+--ticker TICKER ...   One or more tickers to update (mutually exclusive with --all)
+--all                 Update every peer in the database
+--delay FLOAT         Seconds between yfinance requests (default: 1.0)
+--db-path PATH        SQLite database path (default: ./database/sec_filings.db)
 ```
 
 
