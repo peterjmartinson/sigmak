@@ -276,6 +276,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to SQLite database (default: from config.yaml).",
     )
 
+    peer_mc_parser = subparsers.add_parser(
+        "peer-marketcap",
+        help="Populate market-cap data for peers in the filings database.",
+    )
+    peer_mc_mode = peer_mc_parser.add_mutually_exclusive_group(required=True)
+    peer_mc_mode.add_argument(
+        "--ticker",
+        nargs="+",
+        dest="tickers",
+        metavar="TICKER",
+        help="One or more ticker symbols to update.",
+    )
+    peer_mc_mode.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        dest="all_peers",
+        help="Update every peer already stored in the database.",
+    )
+    peer_mc_parser.add_argument(
+        "--delay",
+        type=float,
+        default=1.0,
+        help="Seconds to wait between yfinance requests (default: 1.0).",
+    )
+    peer_mc_parser.add_argument(
+        "--db-path",
+        default="./database/sec_filings.db",
+        dest="db_path",
+        metavar="PATH",
+        help="Path to the SQLite filings database (default: ./database/sec_filings.db).",
+    )
+
     return parser
 
 
@@ -323,6 +356,9 @@ def main(argv: list[str] | None = None) -> None:
         run(**kwargs)
     elif args.command == "backfill":
         from sigmak.cli.backfill import run
+        run(**kwargs)
+    elif args.command == "peer-marketcap":
+        from sigmak.cli.peer_marketcap import run
         run(**kwargs)
 
 
