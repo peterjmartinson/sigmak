@@ -68,20 +68,17 @@ def _sample_collection(client: Any, name: str, limit: int = 5) -> Dict[str, Any]
     out: Dict[str, Any] = {"name": name, "count": 0, "ids": []}
     try:
         col = client.get_collection(name=name)
-        try:
-            sample = col.get(offset=0, limit=limit, include=["ids"])
-        except Exception:
-            sample = {"ids": []}
-        ids = sample.get("ids", [])
-        out["count"] = len(ids)
-        out["ids"] = ids
+        # Use .count() for the true total; ids are always returned by .get()
+        out["count"] = col.count()
+        sample = col.get(offset=0, limit=limit)
+        out["ids"] = sample.get("ids", [])
     except Exception:
         out["error"] = traceback.format_exc()
     return out
 
 
 def run(
-    ticker: str,
+    ticker: str | None = None,
     chroma_dir: str = "./database",
     max_sample: int = 5,
     **_: object,
@@ -91,7 +88,7 @@ def run(
     Parameters
     ----------
     ticker:
-        Target ticker symbol (accepted for CLI consistency; unused here).
+        Accepted for forward-compat; not used by this subcommand.
     chroma_dir:
         Path to the ChromaDB persistence directory.
     max_sample:

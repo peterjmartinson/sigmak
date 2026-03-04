@@ -24,7 +24,7 @@ def test_yoy_run_calls_run_yoy_analysis() -> None:
 def test_yoy_main_dispatch_calls_cli_run() -> None:
     """main() dispatches to cli.yoy.run with ticker forwarded."""
     with patch("sigmak.cli.yoy.run") as mock_run:
-        main(["--ticker", "AAPL", "yoy", "--years", "2023", "2024"])
+        main(["yoy", "--ticker", "AAPL", "--years", "2023", "2024"])
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs["ticker"] == "AAPL"
@@ -33,16 +33,16 @@ def test_yoy_main_dispatch_calls_cli_run() -> None:
 def test_yoy_default_years() -> None:
     """main() passes years=[2023, 2024, 2025] when --years is not supplied."""
     with patch("sigmak.cli.yoy.run") as mock_run:
-        main(["--ticker", "AAPL", "yoy"])
+        main(["yoy", "--ticker", "AAPL"])
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs["years"] == [2023, 2024, 2025]
 
 
 def test_yoy_db_only_flag_passed() -> None:
-    """--db-only global flag is forwarded as db_only=True to cli.yoy.run."""
+    """--db-only flag is forwarded as db_only=True to cli.yoy.run."""
     with patch("sigmak.cli.yoy.run") as mock_run:
-        main(["--ticker", "AAPL", "--db-only", "yoy"])
+        main(["yoy", "--ticker", "AAPL", "--db-only"])
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs["db_only"] is True

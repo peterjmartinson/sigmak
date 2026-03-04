@@ -11,9 +11,9 @@ from sigmak.__main__ import main
 
 
 def test_render_main_dispatch_calls_cli_run() -> None:
-    """main() dispatches to cli.render.run with input_path forwarded."""
+    """main() dispatches to cli.render.run with input_path forwarded; no --ticker needed."""
     with patch("sigmak.cli.render.run") as mock_run:
-        main(["--ticker", "AAPL", "render", "--input", "output/test.md"])
+        main(["render", "--input", "output/test.md"])
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args.kwargs if mock_run.call_args.kwargs else {}
         assert call_kwargs.get("input_path") == "output/test.md"
@@ -44,8 +44,6 @@ def test_render_output_path_forwarded() -> None:
     with patch("sigmak.cli.render.run") as mock_run:
         main(
             [
-                "--ticker",
-                "AAPL",
                 "render",
                 "--input",
                 "output/test.md",

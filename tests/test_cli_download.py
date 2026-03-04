@@ -23,7 +23,7 @@ def test_download_run_signature_accepts_required_args() -> None:
 def test_download_main_dispatch_calls_cli_run() -> None:
     """main() dispatches to cli.download.run with ticker forwarded."""
     with patch("sigmak.cli.download.run") as mock_run:
-        main(["--ticker", "NVDA", "download"])
+        main(["download", "--ticker", "NVDA"])
         mock_run.assert_called_once()
         assert mock_run.call_args[1]["ticker"] == "NVDA"
 
@@ -31,7 +31,7 @@ def test_download_main_dispatch_calls_cli_run() -> None:
 def test_download_include_peers_flag() -> None:
     """--include-peers is forwarded as include_peers=True to cli.download.run."""
     with patch("sigmak.cli.download.run") as mock_run:
-        main(["--ticker", "NVDA", "download", "--include-peers"])
+        main(["download", "--ticker", "NVDA", "--include-peers"])
         mock_run.assert_called_once()
         assert mock_run.call_args[1]["include_peers"] is True
 
@@ -39,6 +39,6 @@ def test_download_include_peers_flag() -> None:
 def test_download_years_forwarded() -> None:
     """--years 2023 2024 is forwarded as years=[2023, 2024] to cli.download.run."""
     with patch("sigmak.cli.download.run") as mock_run:
-        main(["--ticker", "NVDA", "download", "--years", "2023", "2024"])
+        main(["download", "--ticker", "NVDA", "--years", "2023", "2024"])
         mock_run.assert_called_once()
         assert mock_run.call_args[1]["years"] == [2023, 2024]
