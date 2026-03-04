@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2025 Peter Martinson, Distracted Fortune. All rights reserved.
 # This software is proprietary and not licensed for use, modification, or distribution.
+# DEPRECATED: use 'uv run sigmak backfill --dry-run' or 'uv run sigmak backfill --write' instead
 
 """
 Backfill script to populate llm_risk_classification collection from output/*.json files.

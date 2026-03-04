@@ -23,7 +23,7 @@ Edit `report.css` to adjust:
 Create a new CSS file (e.g., `quarterly_report.css`) and pass it to the converter:
 
 ```bash
-python scripts/md_to_pdf.py output/report.md --css styles/quarterly_report.css
+uv run sigmak render --input output/report.md --css styles/quarterly_report.css
 ```
 
 ## CSS Reference

@@ -246,16 +246,15 @@ After analyzing filings, you can backfill existing LLM classifications into the 
 
 ```bash
 # Preview what would be inserted (dry run)
-uv run python scripts/backfill_llm_cache_to_chroma.py --dry-run
+uv run sigmak backfill --dry-run
 
 # Write classifications to database
-uv run python scripts/backfill_llm_cache_to_chroma.py --write
+uv run sigmak backfill --write
 
 # Custom paths
-uv run python scripts/backfill_llm_cache_to_chroma.py --write \
+uv run sigmak backfill --write \
     --output-dir ./custom_output \
-    --db-path ./database/custom.db \
-    --chroma-path ./database/chroma
+    --db-path ./database/custom.db
 ```
 
 **What it does**:
@@ -386,7 +385,7 @@ uv run sigmak analyze --ticker TSLA --year 2022 --html-path data/filings/tsla_20
 ```bash
 # Generate a YoY risk analysis report for multiple years
 # Note: Filing HTM files should be in data/filings/ (e.g., hurc-20231031x10k.htm)
-uv run python scripts/generate_yoy_report.py --ticker HURC --years 2023 2024 2025
+uv run sigmak yoy --ticker HURC --years 2023 2024 2025
 ```
 
 **Output**: `output/HURC_YoY_Risk_Analysis_2023_2025.md`
