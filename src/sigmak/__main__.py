@@ -3,11 +3,11 @@ Entry point for `uv run sigmak` / `python -m sigmak`.
 
 Usage
 -----
-    uv run sigmak --ticker AAPL yoy
-    uv run sigmak --ticker AAPL peers
-    uv run sigmak --ticker AAPL download
-    uv run sigmak --ticker AAPL inspect
-    uv run sigmak --ticker AAPL render --input output/AAPL_YoY.md
+    uv run sigmak yoy --ticker AAPL
+    uv run sigmak peers --ticker AAPL --year 2024
+    uv run sigmak download --ticker AAPL
+    uv run sigmak inspect
+    uv run sigmak render --input output/AAPL_YoY.md
 """
 from __future__ import annotations
 
@@ -27,32 +27,28 @@ def build_parser() -> argparse.ArgumentParser:
         description="Proprietary Risk Scoring CLI for SEC 10-K/Q filings.",
     )
 
-    # --ticker is a required global flag
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command")
+
+    yoy_parser = subparsers.add_parser("yoy", help="Year-over-year risk analysis.")
+    yoy_parser.add_argument(
         "--ticker",
         required=True,
         metavar="TICKER",
         help="Target company ticker symbol (required).",
     )
-
-    # --use-llm / --db-only are mutually exclusive global flags
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
+    yoy_mode_group = yoy_parser.add_mutually_exclusive_group()
+    yoy_mode_group.add_argument(
         "--use-llm",
         action="store_true",
         default=False,
         help="Use LLM for classification (requires GOOGLE_API_KEY).",
     )
-    mode_group.add_argument(
+    yoy_mode_group.add_argument(
         "--db-only",
         action="store_true",
         default=False,
         help="Use ChromaDB only; no LLM calls.",
     )
-
-    subparsers = parser.add_subparsers(dest="command")
-
-    yoy_parser = subparsers.add_parser("yoy", help="Year-over-year risk analysis.")
     yoy_parser.add_argument(
         "--years",
         nargs="+",
@@ -62,6 +58,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Filing years to analyse (default: 2023 2024 2025).",
     )
     peers_parser = subparsers.add_parser("peers", help="Peer comparison report.")
+    peers_parser.add_argument(
+        "--ticker",
+        required=True,
+        metavar="TICKER",
+        help="Target company ticker symbol (required).",
+    )
+    peers_mode_group = peers_parser.add_mutually_exclusive_group()
+    peers_mode_group.add_argument(
+        "--use-llm",
+        action="store_true",
+        default=False,
+        help="Use LLM for classification (requires GOOGLE_API_KEY).",
+    )
+    peers_mode_group.add_argument(
+        "--db-only",
+        action="store_true",
+        default=False,
+        help="Use ChromaDB only; no LLM calls.",
+    )
     peers_parser.add_argument(
         "--year",
         type=int,
@@ -93,6 +108,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use SIC/EDGAR peer selection instead of yfinance (default).",
     )
     download_parser = subparsers.add_parser("download", help="Download SEC filings.")
+    download_parser.add_argument(
+        "--ticker",
+        required=True,
+        metavar="TICKER",
+        help="Target company ticker symbol (required).",
+    )
+    download_parser.add_argument(
+        "--db-only",
+        action="store_true",
+        default=False,
+        dest="db_only",
+        help="Use ChromaDB only; no LLM calls.",
+    )
     download_parser.add_argument(
         "--years",
         nargs="+",
@@ -182,7 +210,12 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(0)
 
+    # Provide safe defaults for flags not present in utility subparsers
+    # (inspect, render do not declare ticker/use_llm/db_only)
     kwargs = vars(args)
+    kwargs.setdefault("ticker", None)
+    kwargs.setdefault("use_llm", False)
+    kwargs.setdefault("db_only", False)
 
     if args.command == "yoy":
         from sigmak.cli.yoy import run

@@ -28,7 +28,7 @@ def test_peers_run_calls_run_peer_comparison() -> None:
 def test_peers_main_dispatch_calls_cli_run() -> None:
     """main() dispatches to cli.peers.run with ticker and year forwarded."""
     with patch("sigmak.cli.peers.run") as mock_run:
-        main(["--ticker", "NVDA", "peers", "--year", "2024"])
+        main(["peers", "--ticker", "NVDA", "--year", "2024"])
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs["ticker"] == "NVDA"
@@ -38,16 +38,16 @@ def test_peers_main_dispatch_calls_cli_run() -> None:
 def test_peers_explicit_peers_forwarded() -> None:
     """--peers AAPL MSFT is forwarded as explicit_peers=['AAPL', 'MSFT']."""
     with patch("sigmak.cli.peers.run") as mock_run:
-        main(["--ticker", "NVDA", "peers", "--year", "2024", "--peers", "AAPL", "MSFT"])
+        main(["peers", "--ticker", "NVDA", "--year", "2024", "--peers", "AAPL", "MSFT"])
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs["explicit_peers"] == ["AAPL", "MSFT"]
 
 
 def test_peers_db_only_flag_forwarded() -> None:
-    """--db-only global flag is forwarded as db_only=True to cli.peers.run."""
+    """--db-only flag is forwarded as db_only=True to cli.peers.run."""
     with patch("sigmak.cli.peers.run") as mock_run:
-        main(["--ticker", "NVDA", "--db-only", "peers", "--year", "2024"])
+        main(["peers", "--ticker", "NVDA", "--db-only", "--year", "2024"])
         mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs["db_only"] is True
@@ -56,12 +56,12 @@ def test_peers_db_only_flag_forwarded() -> None:
 def test_peers_sic_only_flag_registered() -> None:
     """--sic-only is forwarded as use_sic_only=True; defaults to False when absent."""
     with patch("sigmak.cli.peers.run") as mock_run:
-        main(["--ticker", "AAPL", "peers", "--year", "2024", "--sic-only"])
+        main(["peers", "--ticker", "AAPL", "--year", "2024", "--sic-only"])
         mock_run.assert_called_once()
         assert mock_run.call_args[1]["use_sic_only"] is True
 
     with patch("sigmak.cli.peers.run") as mock_run:
-        main(["--ticker", "AAPL", "peers", "--year", "2024"])
+        main(["peers", "--ticker", "AAPL", "--year", "2024"])
         mock_run.assert_called_once()
         assert mock_run.call_args[1]["use_sic_only"] is False
 
