@@ -10,19 +10,32 @@ high-dimensional vector space for semantic analysis.
 ## CLI Usage
 
 ```
-uv run sigmak --ticker AAPL yoy --years 2023 2024 2025
-uv run sigmak --ticker AAPL peers --year 2024
-uv run sigmak --ticker AAPL download
-uv run sigmak --ticker AAPL inspect
-uv run sigmak --ticker AAPL render --input output/AAPL_YoY.md
+uv run sigmak yoy --ticker AAPL --years 2023 2024 2025
+uv run sigmak peers --ticker AAPL --year 2024
+uv run sigmak download --ticker AAPL
+uv run sigmak analyze --ticker TSLA --year 2024 --html-path data/filings/tsla_2024_10k.htm
+uv run sigmak inspect
+uv run sigmak render --input output/AAPL_YoY.md
 ```
 
-Global flags:
+Each subcommand owns its own flags. Common per-subcommand flags:
 ```
---ticker TICKER   Target company (required)
+--ticker TICKER   Target company (required for yoy, peers, download, analyze)
 --use-llm         Use LLM for classification (requires GOOGLE_API_KEY)
 --db-only         Use ChromaDB only, no LLM calls
 ```
+
+`analyze` flags:
+```
+--ticker TICKER       Company ticker symbol (required)
+--year YEAR           Filing year (required)
+--html-path PATH      Path to the SEC HTM filing (required)
+--persist-path PATH   ChromaDB directory (default: ./database)
+--output-dir PATH     Output directory for JSON results (default: ./output)
+--use-llm             Enable LLM classification
+--db-only             Vector-DB-only classification
+```
+
 
 ## Key Features
 
@@ -340,7 +353,7 @@ The fastest way to analyze a SEC filing is with the CLI utility:
 # Save the main .htm file (NOT the -index.htm) to data/filings/
 
 # Analyze the filing
-uv run python scripts/analyze_filing.py --ticker TSLA --year 2022
+uv run sigmak analyze --ticker TSLA --year 2022 --html-path data/filings/tsla_2022_10k.htm
 ```
 
 **Output**:

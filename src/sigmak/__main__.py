@@ -6,6 +6,7 @@ Usage
     uv run sigmak yoy --ticker AAPL
     uv run sigmak peers --ticker AAPL --year 2024
     uv run sigmak download --ticker AAPL
+    uv run sigmak analyze --ticker AAPL --year 2024 --html-path data/filings/AAPL/2024/filing.htm
     uv run sigmak inspect
     uv run sigmak render --input output/AAPL_YoY.md
 """
@@ -145,6 +146,58 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Maximum number of peers to download when --include-peers is set (default: 6).",
     )
+
+    analyze_parser = subparsers.add_parser(
+        "analyze", help="Analyze a downloaded HTM filing and persist results."
+    )
+    analyze_parser.add_argument(
+        "--ticker",
+        required=True,
+        metavar="TICKER",
+        help="Target company ticker symbol (required).",
+    )
+    analyze_parser.add_argument(
+        "--year",
+        type=int,
+        required=True,
+        metavar="YEAR",
+        help="Filing year (e.g. 2024).",
+    )
+    analyze_parser.add_argument(
+        "--html-path",
+        required=True,
+        dest="html_path",
+        metavar="PATH",
+        help="Path to the downloaded HTM filing.",
+    )
+    analyze_parser.add_argument(
+        "--persist-path",
+        default="./database",
+        dest="persist_path",
+        metavar="PATH",
+        help="ChromaDB/SQLite persistence directory (default: ./database).",
+    )
+    analyze_parser.add_argument(
+        "--output-dir",
+        default="./output",
+        dest="output_dir",
+        metavar="PATH",
+        help="Directory for output JSON cache (default: ./output).",
+    )
+    analyze_mode_group = analyze_parser.add_mutually_exclusive_group()
+    analyze_mode_group.add_argument(
+        "--use-llm",
+        action="store_true",
+        default=False,
+        help="Force LLM classification (requires GOOGLE_API_KEY).",
+    )
+    analyze_mode_group.add_argument(
+        "--db-only",
+        action="store_true",
+        default=False,
+        help="Skip LLM entirely; use vector-DB similarity only.",
+    )
+
     inspect_parser = subparsers.add_parser("inspect", help="Inspect the local database.")
     inspect_parser.add_argument(
         "--chroma-dir",
@@ -225,6 +278,9 @@ def main(argv: list[str] | None = None) -> None:
         run(**kwargs)
     elif args.command == "download":
         from sigmak.cli.download import run
+        run(**kwargs)
+    elif args.command == "analyze":
+        from sigmak.cli.analyze import run
         run(**kwargs)
     elif args.command == "inspect":
         from sigmak.cli.inspect_db import run
