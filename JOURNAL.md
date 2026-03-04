@@ -1,3 +1,31 @@
+## [2026-03-04] Issue 116: Wire analyze CLI Subcommand
+
+### Status: COMPLETE ✓
+
+### Summary
+Wired the `analyze` subcommand so `uv run sigmak analyze --ticker TSLA --year 2024 --html-path <file>` runs the full integration pipeline. Extracted orchestration into `src/sigmak/cli/analyze.py`. Simplified `scripts/analyze_filing.py` to a thin positional-arg wrapper that delegates to the new handler. 3 tests written first (TDD). Zero regressions across 16 tests.
+
+### What I changed
+
+**New files**
+- `src/sigmak/cli/analyze.py` — `run(ticker, year, html_path, persist_path, output_dir, use_llm, db_only, **_)` with `_classify_risks()` helper
+- `tests/test_cli_analyze.py` — 3 unit tests: dispatch wiring, missing-html exit, persist-path forwarding
+
+**Modified files**
+- `src/sigmak/__main__.py` — added `analyze` subparser with `--ticker`, `--year`, `--html-path`, `--persist-path`, `--output-dir`, `--use-llm`/`--db-only`; dispatch added
+- `scripts/analyze_filing.py` — replaced full implementation with 3-arg positional CLI wrapper delegating to `sigmak.cli.analyze.run`
+
+### Test results
+```
+16 passed in 6.25s
+tests/test_cli_analyze.py::test_analyze_main_dispatch_calls_cli_run PASSED
+tests/test_cli_analyze.py::test_analyze_missing_html_exits_gracefully PASSED
+tests/test_cli_analyze.py::test_analyze_persist_path_forwarded PASSED
+tests/test_main.py — 13 existing tests all green
+```
+
+---
+
 ## [2026-03-03] Issue 102: Wire yoy CLI Subcommand
 
 ### Status: COMPLETE ✓
