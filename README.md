@@ -41,9 +41,11 @@ When a company\'s risk language shifts, that signal is buried in thousands of wo
 | Avg Severity | 0.518 | — |
 | Severity Percentile | **80th** | — |
 | Risk Paragraphs | 9 | 7 |
-| Linguistic Intensity (per 1k words) | 19.1 | 14.6 |
+| Linguistic Intensity¹ (per 1k words) | 19.1 | 14.6 |
 | Textual Novelty (YoY new sentences) | **72.2%** | — |
 | Peer Similarity (avg Jaccard) | 0.25 | — |
+
+> ¹ **Linguistic Intensity** = frequency of high-impact risk adjectives and escalatory language (e.g., *material*, *adverse*, *catastrophic*, *could have a significant effect*) per 1,000 words. Higher values indicate more emphatic risk disclosure language.
 
 > **Reading the scores:** Severity (0–1) = potential business impact. Novelty (0–1) = how semantically different this disclosure is from the company\'s historical baseline. `0.00` novelty = language repeated verbatim from prior filings. `0.33` novelty on the FX risk = that language has shifted meaningfully year-over-year.
 
@@ -192,6 +194,8 @@ SigmaK is in active development and calibration. The proprietary severity and no
 - Scores are directionally reliable but should be reviewed before use in financial models
 - Classification rationales and source citations are always included so reviewers can validate outputs
 - Feedback on miscategorised risks or unexpected scores is actively used to improve the system
+
+**To request a sample report, please contact peter.j.martinson@gmail.com**
 
 If you\'re using SigmaK and want to contribute feedback or participate in the alpha testing program, reach out via the repository issues.
 
