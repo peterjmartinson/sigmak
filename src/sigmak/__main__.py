@@ -243,6 +243,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Document title (default: input filename stem).",
     )
 
+    backfill_parser = subparsers.add_parser(
+        "backfill",
+        help="Backfill LLM classifications from output/*.json into ChromaDB.",
+    )
+    backfill_mode_group = backfill_parser.add_mutually_exclusive_group()
+    backfill_mode_group.add_argument(
+        "--write",
+        action="store_true",
+        default=False,
+        help="Persist results to SQLite and ChromaDB.",
+    )
+    backfill_mode_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        dest="dry_run",
+        help="Preview changes without writing to any database.",
+    )
+    backfill_parser.add_argument(
+        "--output-dir",
+        default="./output",
+        dest="output_dir",
+        metavar="PATH",
+        help="Directory containing results_*.json files (default: ./output).",
+    )
+    backfill_parser.add_argument(
+        "--db-path",
+        default="./database/sec_filings.db",
+        dest="db_path",
+        metavar="PATH",
+        help="Path to SQLite database (default: from config.yaml).",
+    )
+
     return parser
 
 
@@ -287,6 +320,9 @@ def main(argv: list[str] | None = None) -> None:
         run(**kwargs)
     elif args.command == "render":
         from sigmak.cli.render import run
+        run(**kwargs)
+    elif args.command == "backfill":
+        from sigmak.cli.backfill import run
         run(**kwargs)
 
 

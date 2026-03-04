@@ -1,3 +1,37 @@
+## [2026-03-04] Issue 117: Wire backfill CLI Subcommand
+
+### Status: COMPLETE ✓
+
+### Summary
+Wired the `backfill` subcommand so `uv run sigmak backfill --dry-run` / `--write` runs the LLM classification backfill over `output/results_*.json`. Promoted the three helper functions (`load_output_json`, `extract_llm_result`, `backfill_entry`) and the new `run_backfill()` orchestrator into a new library module `src/sigmak/backfill.py` so the CLI handler has no dependency on `scripts/`. 4 tests written first (TDD). Zero regressions across 17 tests.
+
+### What I changed
+
+**New files**
+- `src/sigmak/backfill.py` — `BackfillStats`, `load_output_json`, `extract_llm_result`, `backfill_entry`, `run_backfill()` (promoted from old script)
+- `src/sigmak/cli/backfill.py` — `run(write, dry_run, output_dir, db_path, **_)` handler
+- `tests/test_cli_backfill.py` — 4 unit tests (TDD)
+
+**Modified files**
+- `src/sigmak/__main__.py` — added `backfill` subparser (`--write`/`--dry-run` mutually exclusive, `--output-dir`, `--db-path`; no `--ticker`); dispatch branch added
+- `scripts/backfill_llm_cache_to_chroma.py` — replaced full implementation with thin argparse wrapper delegating to `cli.backfill.run()`
+
+### Design decisions
+- `--chroma-path` omitted from subcommand; resolved via `get_settings()` (consistent with other subcommands)
+- Neither `--write` nor `--dry-run` given → defaults to `dry_run=True` (safe, prints a warning)
+
+### Test results
+```
+17 passed in 0.10s
+tests/test_cli_backfill.py::test_backfill_main_dispatch_calls_cli_run PASSED
+tests/test_cli_backfill.py::test_backfill_write_flag_forwarded PASSED
+tests/test_cli_backfill.py::test_backfill_output_dir_forwarded PASSED
+tests/test_cli_backfill.py::test_backfill_no_ticker_required PASSED
+tests/test_main.py — 13 existing tests all green
+```
+
+---
+
 ## [2026-03-04] Issue 116: Wire analyze CLI Subcommand
 
 ### Status: COMPLETE ✓
