@@ -1,3 +1,28 @@
+## [2026-03-03] Issue 115: Refactor README — Scream Sheet Update
+
+### Status: COMPLETE ✓
+
+### Summary
+Reduced `README.md` from 1,257 to 215 lines (83% reduction) by extracting all deep-dive technical content into a new `documentation/ARCHITECTURE.md`. The README now leads with a value proposition, a "Why SigmaK?" comparison table, and a sample output section built from actual generated data files (`results_ABT_2025.json` + `ABT_Peer_Comparison_2025.yaml`). Two persona-based Quick Start paths added (Analyst and Engineer). A "Human in the Loop" alpha section added. All `pytest` and `mypy` instructions retained; linked to ARCHITECTURE.md for deeper content.
+
+### What Changed
+- **`README.md`** — 1,257 → 215 lines. New structure: value hook → Why SigmaK? table → Sample Output (real ABT data) → Key Features → Risk Taxonomy → Quick Start Analyst → Quick Start Engineer → CLI Reference → Human in the Loop → Testing
+- **`documentation/ARCHITECTURE.md`** — New file (614 lines). Contains: system architecture, storage/retrieval, config YAML reference, programmatic usage (IndexingPipeline, RiskScorer, IntegrationPipeline), REST API reference, drift detection, deployment (Docker/Digital Ocean), performance tuning, maintenance, yfinance peer adapter
+
+### Definition of Done — Verified
+- [x] README reduced by 50-60%+ (achieved 83%)
+- [x] `documentation/ARCHITECTURE.md` created with performance/maintenance/API specs
+- [x] "Why SigmaK?" comparison table present in README
+- [x] `mypy` and `pytest` instructions remain discoverable (Testing section)
+- [x] CI badge retained
+- [x] "Human in the Loop" alpha section added
+- [x] Sample output from real data files (not synthesised)
+
+### Commit
+`f0a03cd` — feat(#115): rewrite README as scream-sheet; extract architecture to documentation/ARCHITECTURE.md
+
+---
+
 ## [2026-03-04] Issue 106: Deprecate /scripts — Regression Fix
 
 ### Status: COMPLETE ✓
